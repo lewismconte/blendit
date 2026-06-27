@@ -1,0 +1,144 @@
+{
+  "contract_version": "0.1.0",
+  "source": {
+    "app": "Fixture",
+    "app_version": "0",
+    "document": "fixture",
+    "active_view": "3D - Fixture",
+    "exported_at": "2026-06-24T00:00:00Z"
+  },
+  "units": {
+    "source_unit": "feet",
+    "scale_to_meters": 0.3048,
+    "up_axis": "Z"
+  },
+  "coordinate_system": {
+    "project_base_point": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "survey_point": null,
+    "true_north_degrees": 0.0
+  },
+  "geometry": {
+    "transport": "gltf",
+    "uri": "scene.glb",
+    "elements": [
+      {
+        "node": "Box_1",
+        "element_id": "1",
+        "category": "Walls",
+        "family": "",
+        "type_name": "",
+        "level": "L1",
+        "material_id": "mat_concrete"
+      },
+      {
+        "node": "Glass_1",
+        "element_id": "2",
+        "category": "Curtain Panels",
+        "family": "",
+        "type_name": "",
+        "level": "L1",
+        "material_id": "mat_glass"
+      }
+    ]
+  },
+  "materials": [
+    {
+      "id": "mat_concrete",
+      "name": "Concrete - Smooth",
+      "base_color": [
+        0.55,
+        0.55,
+        0.53
+      ],
+      "metallic": 0.0,
+      "roughness": 0.7,
+      "transparency": 0.0,
+      "ior": 1.45,
+      "emissive": null,
+      "emissive_strength": 0.0
+    },
+    {
+      "id": "mat_glass",
+      "name": "Glass - Clear",
+      "base_color": [
+        0.85,
+        0.9,
+        0.9
+      ],
+      "metallic": 0.0,
+      "roughness": 0.05,
+      "transparency": 0.9,
+      "ior": 1.52,
+      "emissive": null,
+      "emissive_strength": 0.0
+    }
+  ],
+  "camera": {
+    "name": "3D - Fixture",
+    "type": "perspective",
+    "position": [
+      28.0,
+      -34.0,
+      16.0
+    ],
+    "target": [
+      5.0,
+      5.0,
+      5.0
+    ],
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "fov_degrees": 45.0,
+    "ortho_scale": null,
+    "focal_length_mm": null,
+    "sensor_mm": 36.0,
+    "clip_start": 0.1,
+    "clip_end": 10000.0,
+    "two_point_perspective": true
+  },
+  "sun": {
+    "mode": "geographic",
+    "latitude": 51.5074,
+    "longitude": -0.1278,
+    "date": "2026-06-21",
+    "time": "16:30",
+    "timezone": 1.0,
+    "daylight_saving": true,
+    "azimuth_degrees": null,
+    "altitude_degrees": null,
+    "direction": null,
+    "strength": 1.0,
+    "angle_degrees": 0.526,
+    "color": null
+  },
+  "world": {
+    "sky_type": "nishita",
+    "hdri_uri": null,
+    "strength": 1.0,
+    "ground_albedo": [
+      0.3,
+      0.3,
+      0.3
+    ]
+  },
+  "render": {
+    "mode": "realistic",
+    "engine": "CYCLES",
+    "resolution": [
+      960,
+      540
+    ],
+    "samples": 32,
+    "denoise": true,
+    "film_transparent": false,
+    "view_transform": "AgX",
+    "exposure": 0.0
+  }
+}

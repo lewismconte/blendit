@@ -1,0 +1,12 @@
+{
+    "default_enabled": "True",
+    "type": "extension",
+    "rocket_mode_compatible": "True",
+    "name": "Blendit",
+    "description": "One-click Revit to Blender rendering. Extract the active 3D view and render it in Blender with a curated pipeline: eight render modes, an interactive review session, and headless renders. Bridges Blender as a separate process (the Blender pipeline ships inside this extension).",
+    "author": "lewismconte",
+    "author_profile": "https://github.com/lewismconte",
+    "url": "https://github.com/lewismconte/blendit",
+    "website": "https://github.com/lewismconte/blendit",
+    "dependencies": []
+}

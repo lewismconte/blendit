@@ -1,0 +1,12 @@
+# Order the Mode dropdown by family (lit modes, then NPR), matching the interactive
+# N-panel. Without this pyRevit lists them alphabetically.
+layout:
+  - Realistic          # lit / PBR modes
+  - White
+  - Shadow
+  - Specular
+  - "---"
+  - Linework           # NPR modes
+  - Pen
+  - Sketch
+  - Cel

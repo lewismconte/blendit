@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blendit/scene_spec.schema.json",
+  "title": "SceneSpec",
+  "type": "object",
+  "required": ["contract_version", "geometry", "camera", "sun", "render"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": { "type": "string" },
+    "source": {
+      "type": "object",
+      "properties": {
+        "app": { "type": "string" },
+        "app_version": { "type": "string" },
+        "document": { "type": "string" },
+        "active_view": { "type": "string" },
+        "exported_at": { "type": "string" }
+      }
+    },
+    "units": {
+      "type": "object",
+      "properties": {
+        "source_unit": { "type": "string" },
+        "scale_to_meters": { "type": "number" },
+        "up_axis": { "type": "string", "enum": ["Z", "Y"] }
+      }
+    },
+    "coordinate_system": {
+      "type": "object",
+      "properties": {
+        "project_base_point": { "$ref": "#/$defs/vec3" },
+        "survey_point": { "$ref": "#/$defs/vec3" },
+        "true_north_degrees": { "type": "number" }
+      }
+    },
+    "geometry": {
+      "type": "object",
+      "required": ["transport", "uri"],
+      "properties": {
+        "transport": { "type": "string" },
+        "uri": { "type": "string" },
+        "elements": { "type": "array", "items": { "$ref": "#/$defs/element" } }
+      }
+    },
+    "materials": { "type": "array", "items": { "$ref": "#/$defs/material" } },
+    "camera": { "$ref": "#/$defs/camera" },
+    "sun": { "$ref": "#/$defs/sun" },
+    "world": { "$ref": "#/$defs/world" },
+    "render": { "$ref": "#/$defs/render" }
+  },
+  "$defs": {
+    "vec3": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "rgb":  { "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 3, "maxItems": 3 },
+    "element": {
+      "type": "object",
+      "required": ["node"],
+      "properties": {
+        "node": { "type": "string" },
+        "element_id": { "type": "string" },
+        "category": { "type": "string" },
+        "family": { "type": "string" },
+        "type_name": { "type": "string" },
+        "level": { "type": "string" },
+        "material_id": { "type": ["string", "null"] }
+      }
+    },
+    "material": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "base_color": { "$ref": "#/$defs/rgb" },
+        "metallic": { "type": "number", "minimum": 0, "maximum": 1 },
+        "roughness": { "type": "number", "minimum": 0, "maximum": 1 },
+        "transparency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "ior": { "type": "number" },
+        "emissive": { "oneOf": [{ "$ref": "#/$defs/rgb" }, { "type": "null" }] },
+        "emissive_strength": { "type": "number" }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "required": ["position", "target"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["perspective", "orthographic"] },
+        "position": { "$ref": "#/$defs/vec3" },
+        "target": { "$ref": "#/$defs/vec3" },
+        "up": { "$ref": "#/$defs/vec3" },
+        "fov_degrees": { "type": "number" },
+        "ortho_scale": { "type": ["number", "null"] },
+        "focal_length_mm": { "type": ["number", "null"] },
+        "sensor_mm": { "type": "number" },
+        "clip_start": { "type": "number" },
+        "clip_end": { "type": "number" },
+        "two_point_perspective": { "type": "boolean" }
+      }
+    },
+    "sun": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["geographic", "direct", "vector"] },
+        "latitude": { "type": ["number", "null"] },
+        "longitude": { "type": ["number", "null"] },
+        "date": { "type": ["string", "null"] },
+        "time": { "type": ["string", "null"] },
+        "timezone": { "type": ["number", "null"] },
+        "daylight_saving": { "type": "boolean" },
+        "azimuth_degrees": { "type": ["number", "null"] },
+        "altitude_degrees": { "type": ["number", "null"] },
+        "direction": { "oneOf": [{ "$ref": "#/$defs/vec3" }, { "type": "null" }] },
+        "strength": { "type": "number" },
+        "angle_degrees": { "type": "number" },
+        "color": { "oneOf": [{ "$ref": "#/$defs/rgb" }, { "type": "null" }] }
+      }
+    },
+    "world": {
+      "type": "object",
+      "properties": {
+        "sky_type": { "type": "string", "enum": ["nishita", "hdri", "solid"] },
+        "hdri_uri": { "type": ["string", "null"] },
+        "strength": { "type": "number" },
+        "ground_albedo": { "$ref": "#/$defs/rgb" }
+      }
+    },
+    "render": {
+      "type": "object",
+      "required": ["mode", "engine"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["realistic", "white", "shadow", "linework", "specular"] },
+        "engine": { "type": "string", "enum": ["CYCLES", "EEVEE"] },
+        "resolution": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+        "samples": { "type": "integer" },
+        "denoise": { "type": "boolean" },
+        "film_transparent": { "type": "boolean" },
+        "view_transform": { "type": "string" },
+        "exposure": { "type": "number" }
+      }
+    }
+  }
+}

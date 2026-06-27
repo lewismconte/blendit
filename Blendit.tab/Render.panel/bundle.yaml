@@ -1,0 +1,16 @@
+# Ribbon order for the Render panel. pyRevit reads the order from this metadata
+# file (the older `_layout` text file is deprecated and ignored). `---` is a
+# visible separator that groups buttons without hiding them; `>>>` would push the
+# rest into a slide-out drawer.
+layout:
+  - LoadModel          # extract the active 3D view -> cache (the slow, explicit step)
+  - OpenModel          # open the loaded model in interactive Blender
+  - RenderLoadedModel  # headless render the loaded model as-is
+  - "---"
+  - Mode               # render mode (8 looks)
+  - Quality            # effort preset (engine + samples + denoise)
+  - Resolution         # output size
+  - Engine             # Cycles / EEVEE toggle
+  - "---"
+  - OpenRenders        # open the output folder
+  - Settings           # configure everything

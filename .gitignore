@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Blender
+*.blend1
+*.blend2
+
+# Render / bundle output (generated at runtime, never committed)
+/out/
+/_bundles/
+/tests/_out/
+# NB: do NOT blanket-ignore *.png — icon.png (button) and committed fixtures stay.
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

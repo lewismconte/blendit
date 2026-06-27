@@ -1,0 +1,10 @@
+# Normalize text line endings to LF in the repository (checked out native on each
+# platform). Keeps the repo clean for cross-platform contributors.
+* text=auto
+
+# Binary assets - never apply text/line-ending filters (would corrupt them).
+*.png   binary
+*.glb   binary
+*.gltf  binary
+*.blend binary
+*.ico   binary
