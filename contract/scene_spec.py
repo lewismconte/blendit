@@ -11,7 +11,10 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Optional
 
-CONTRACT_VERSION = "0.1.0"
+# Single source of truth: transport.py owns CONTRACT_VERSION (it is the IronPython-
+# safe module imported by both sides). Re-export it here so the dataclass side and
+# the Revit side can never disagree.
+from .transport import CONTRACT_VERSION
 
 
 class Engine(str, Enum):
@@ -25,6 +28,15 @@ class RenderMode(str, Enum):
     SHADOW = "shadow"         # sun-accurate shadow study
     LINEWORK = "linework"     # NPR outlines
     SPECULAR = "specular"     # lookdev / reflectivity
+    PEN = "pen"               # NPR technical pen
+    SKETCH = "sketch"         # NPR hand-drawn sketch
+    CEL = "cel"               # NPR anime cel shading
+
+
+# Canonical list of every render mode -- the SINGLE SOURCE OF TRUTH for the set of
+# modes. The JSON schema's render.mode enum and the Blender preset registry are both
+# checked against this in tests/, so the three can never silently drift.
+RENDER_MODES = tuple(m.value for m in RenderMode)
 
 
 class SkyType(str, Enum):

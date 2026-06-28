@@ -15,6 +15,17 @@ if _ROOT not in sys.path:
 
 import blender.interactive.live as live   # importable now (no main() on import)
 
+# Mode-list single source of truth: the Blender preset registry must list EXACTLY
+# the modes the contract declares (RENDER_MODES). Importing the presets package
+# registers all of them; this fails loudly if the registry and the contract drift.
+from blender.pipeline.presets import preset_names
+from contract.scene_spec import RENDER_MODES
+assert set(preset_names()) == set(RENDER_MODES), (
+    "preset registry %s != contract RENDER_MODES %s"
+    % (sorted(preset_names()), sorted(RENDER_MODES)))
+print("preset registry matches RENDER_MODES (%d modes): %s"
+      % (len(RENDER_MODES), sorted(RENDER_MODES)))
+
 # Register for real, letting any definition error raise.
 for cls in live._CLASSES:
     bpy.utils.register_class(cls)
