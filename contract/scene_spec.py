@@ -31,6 +31,7 @@ class RenderMode(str, Enum):
     PEN = "pen"               # NPR technical pen
     SKETCH = "sketch"         # NPR hand-drawn sketch
     CEL = "cel"               # NPR anime cel shading
+    HATCH = "hatch"           # NPR tonal shadow hatching
 
 
 # Canonical list of every render mode -- the SINGLE SOURCE OF TRUTH for the set of

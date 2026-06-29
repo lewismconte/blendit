@@ -73,8 +73,28 @@ the tests skip (no `bpy`).
 **Quick check without pytest** (uses your installed Blender directly):
 
 ```
-blender --background --python tests/smoke_render.py   # renders the 5 Cycles-safe modes
+blender --background --python tests/smoke_render.py        # renders the 5 Cycles-safe modes
+blender --background --python tests/headless_vector_export.py  # SVG + PDF line export
+python tests/test_svg_to_pdf.py                            # the SVG->PDF converter (no Blender)
 ```
+
+## Vector export (SVG / PDF)
+
+In a line mode (linework / pen / sketch / cel) the scene has a Grease Pencil Line
+Art object (`npr.setup_line_art` → `BIR_LineArt`). `blender/pipeline/vector_export.py`
+projects it through the scene camera into a true vector file:
+
+- **SVG** goes straight through Blender's Grease Pencil SVG exporter
+  (`wm.grease_pencil_export_svg`, `use_clip_camera` to clip to the frame).
+- **PDF** does *not* use Blender's native GP PDF exporter — it's broken in the 5.0
+  build (the HARU backend writes nothing and **segfaults on repeat calls**). Instead
+  Blendit exports SVG, then converts it with `blender/pipeline/svg_to_pdf.py`, a
+  pure-Python (no-deps, no-`bpy`) converter — the GP SVG is only straight-segment
+  filled paths, which map cleanly to PDF path/fill ops.
+
+Interactive: the Open Model panel shows **Export SVG / PDF** in line modes (snaps
+the camera to your view first, writes to `<output>/vectors/`). Headless:
+`render.py --vector svg|pdf` (see [README](../README.md)).
 
 Pin the exact CI `bpy` wheel in [README.md](../README.md) once chosen. Verified
 working on Blender 5.0.

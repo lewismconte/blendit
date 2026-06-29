@@ -66,17 +66,10 @@ def show_ground():
 
 
 def default_line_radius():
-    """Line thickness scaled to the model so it reads at any project size."""
-    try:
-        from .camera import _scene_bbox
-        bb = _scene_bbox()
-        if bb:
-            mn, mx = bb
-            diag = (mx - mn).length
-            return max(0.004, diag * 0.0004)
-    except Exception:
-        pass
-    return 0.02
+    """Default Line Art pen width, in world metres. A flat 0.05 reads best for
+    architecture (the scene is imported to real metres), and looks cleaner than the
+    old model-diagonal scaling. The Line Thickness slider tunes it per shot."""
+    return 0.05
 
 
 def set_flat_view():
@@ -268,9 +261,12 @@ def set_line_art_occlusion(show_hidden):
 
 def refresh_line_art():
     """Force the (unbaked) Line Art to re-trace for the current camera + settings.
-    Line Art is camera-relative, so callers snap the camera to the view first."""
+    Line Art is camera-relative, so callers snap the camera to the view first.
+    No-op when baked (a stray refresh must not un-mute a frozen result)."""
     m = _active_lineart_mod()
     if m is not None:
+        if not m.show_viewport:    # baked / muted -> leave it frozen
+            return
         try:                       # nudge a clean recompute on the next eval
             m.show_viewport = False
             m.show_viewport = True
@@ -280,6 +276,99 @@ def refresh_line_art():
         bpy.context.view_layer.update()
     except Exception:
         pass
+
+
+# --- bake / cache ----------------------------------------------------------
+# Line Art is procedural: it re-traces on every depsgraph eval (mode switch,
+# export, render, sometimes a slider drag) - the bulk of the "pen mode is
+# sluggish" cost on detailed models. Baking freezes the current trace into stored
+# strokes and mutes the modifier, so export / render / capture reuse it instead of
+# recomputing. Regenerate un-freezes, re-traces for the new camera, and re-bakes.
+def is_line_art_baked():
+    gp = bpy.data.objects.get(_GP_NAME)
+    if gp is None:
+        return False
+    m = _lineart_mod(gp)
+    return m is not None and not m.show_viewport
+
+
+def _copy_drawing(src, dst):
+    """Copy strokes (points: position/radius/opacity + cyclic/material) from one GP
+    drawing to another, replacing the destination's strokes."""
+    if len(dst.strokes):
+        dst.remove_strokes(indices=list(range(len(dst.strokes))))
+    sizes = [len(s.points) for s in src.strokes]
+    if not sizes:
+        return
+    dst.add_strokes(sizes)
+    for i, s in enumerate(src.strokes):
+        ds = dst.strokes[i]
+        try:
+            ds.cyclic = s.cyclic
+            ds.material_index = s.material_index
+        except Exception:
+            pass
+        for j, p in enumerate(s.points):
+            dp = ds.points[j]
+            dp.position = p.position
+            dp.radius = p.radius
+            dp.opacity = p.opacity
+    try:
+        dst.tag_positions_changed()
+    except Exception:
+        pass
+
+
+def bake_line_art():
+    """Freeze the procedural Line Art into stored strokes + mute the modifier so it
+    stops re-tracing on every eval / export / render. Done via the data API (no
+    bpy.ops) so it's reliable in the live session's timer context. Returns True if
+    baked (or already baked); never fatal - on failure the modifier is left live."""
+    gp = bpy.data.objects.get(_GP_NAME)
+    if gp is None:
+        return False
+    m = _lineart_mod(gp)
+    if m is None:
+        return False
+    if not m.show_viewport:
+        return True                       # already baked (guards against dupes)
+    try:
+        bpy.context.view_layer.update()   # ensure the live modifier has traced
+        dg = bpy.context.evaluated_depsgraph_get()
+        ev = gp.evaluated_get(dg)
+        for li, slay in enumerate(ev.data.layers):
+            if li >= len(gp.data.layers):
+                continue
+            dlay = gp.data.layers[li]
+            if not len(slay.frames) or not len(dlay.frames):
+                continue
+            _copy_drawing(slay.frames[0].drawing, dlay.frames[0].drawing)
+    except Exception as ex:
+        print("Blendit: bake_line_art failed: %s" % ex)
+        return False
+    m.show_viewport = False
+    m.show_render = False
+    return True
+
+
+def unbake_line_art():
+    """Drop the baked strokes and re-enable the modifier so the next eval retraces."""
+    gp = bpy.data.objects.get(_GP_NAME)
+    if gp is None:
+        return
+    m = _lineart_mod(gp)
+    if m is None:
+        return
+    try:
+        for lay in gp.data.layers:
+            for fr in lay.frames:
+                drw = fr.drawing
+                if len(drw.strokes):
+                    drw.remove_strokes(indices=list(range(len(drw.strokes))))
+    except Exception:
+        pass
+    m.show_viewport = True
+    m.show_render = True
 
 
 def set_sketchiness(amount):
@@ -383,3 +472,223 @@ def apply_toon(loaded, shades=3):
 def set_toon_shades(loaded, shades):
     """Live update: rebuild the toon ramps with a new band count."""
     apply_toon(loaded, shades)
+
+
+# --- shadow hatch (tone-driven CONTINUOUS hatch lines) ---------------------
+# Extract the surface shading (Shader-to-RGB, includes cast shadows) and use it to
+# set the WIDTH of a single continuous screen-space stripe pattern via a stepped
+# ramp: lit = blank paper, light shade = thin lines, deeper shadow = thicker lines
+# that merge toward solid black. Because tone only sets line THICKNESS (never turns
+# a line on/off per pixel), the lines stay continuous - no start/stop dashing - and
+# the stepped ramp gives several distinct tones. Screen-space (Window) coords keep
+# the hatch a constant width regardless of distance/angle (reads as hand-drawn ink,
+# not a texture stuck to the wall). EEVEE-only (Shader-to-RGB).
+#
+# `bands`: (lit_threshold, line_width) stops, darkest first; CONSTANT-interpolated.
+_HATCH_BANDS = [(0.0, 1.0), (0.16, 0.55), (0.36, 0.32), (0.56, 0.15), (0.76, 0.0)]
+
+
+def make_hatch_material(name="BIR_Hatch", density=42.0, cross=False,
+                        bands=None, ao_distance=0.0):
+    bands = bands or _HATCH_BANDS
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    out.location = (1200, 0)
+
+    # 1. shaded tone (0 = shadow .. 1 = lit), cast shadows included
+    diff = nt.nodes.new("ShaderNodeBsdfDiffuse")
+    diff.location = (-1040, -280)
+    diff.inputs["Color"].default_value = (0.8, 0.8, 0.8, 1.0)
+    s2 = nt.nodes.new("ShaderNodeShaderToRGB")
+    s2.location = (-840, -280)
+    nt.links.new(diff.outputs["BSDF"], s2.inputs["Shader"])
+    bw = nt.nodes.new("ShaderNodeRGBToBW")
+    bw.location = (-660, -280)
+    nt.links.new(s2.outputs["Color"], bw.inputs["Color"])
+    tone = bw.outputs["Val"]
+
+    # Darken occluded crevices (box-ground contact, gaps) so deep pockets fall into
+    # the dense bands - the near-solid base shadows in a hand drawing.
+    if ao_distance and ao_distance > 0.0:
+        ao = nt.nodes.new("ShaderNodeAmbientOcclusion")
+        ao.location = (-840, -480)
+        try:
+            ao.inputs["Distance"].default_value = float(ao_distance)
+        except Exception:
+            pass
+        mul_ao = nt.nodes.new("ShaderNodeMath")
+        mul_ao.location = (-600, -360)
+        mul_ao.operation = "MULTIPLY"
+        nt.links.new(tone, mul_ao.inputs[0])
+        nt.links.new(ao.outputs["AO"], mul_ao.inputs[1])
+        tone = mul_ao.outputs["Value"]
+
+    # 2. tone -> line WIDTH, stepped (CONSTANT = hard tone bands)
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.location = (-480, -280)
+    cr = ramp.color_ramp
+    cr.interpolation = "CONSTANT"
+    els = cr.elements
+    els[0].position, els[0].color = bands[0][0], (bands[0][1],) * 3 + (1.0,)
+    els[1].position, els[1].color = bands[1][0], (bands[1][1],) * 3 + (1.0,)
+    for pos, val in bands[2:]:
+        e = els.new(pos)
+        e.color = (val, val, val, 1.0)
+    nt.links.new(tone, ramp.inputs["Fac"])
+    wbw = nt.nodes.new("ShaderNodeRGBToBW")
+    wbw.location = (-280, -280)
+    nt.links.new(ramp.outputs["Color"], wbw.inputs["Color"])
+    width = wbw.outputs["Val"]
+
+    # Flat screen-space stripes converge WRONG under perspective (dead-parallel).
+    # Build the hatch in the VIEW-RAY ANGULAR domain instead - like a striped
+    # environment wrapped on the view sphere: stripes of constant azimuth around
+    # world-up are vertical lines that converge to the zenith / nadir vanishing
+    # points (true perspective). Cross-hatch uses the elevation angle (the
+    # concentric latitude lines).
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
+    geo.location = (-1040, 400)
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    sep.location = (-860, 400)
+    nt.links.new(geo.outputs["Incoming"], sep.inputs["Vector"])
+    sx, sy, sz = sep.outputs["X"], sep.outputs["Y"], sep.outputs["Z"]
+
+    def _m(op, a, b=None, loc=(0, 0)):
+        n = nt.nodes.new("ShaderNodeMath")
+        n.operation = op
+        n.location = loc
+        for idx, v in ((0, a), (1, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                n.inputs[idx].default_value = float(v)
+            else:
+                nt.links.new(v, n.inputs[idx])
+        return n.outputs["Value"]
+
+    def _coverage(angle, y):
+        phase = _m("MULTIPLY", angle, density, (-520, y))
+        saw = _m("FRACT", phase, None, (-360, y))
+        return _m("LESS_THAN", saw, width, (-200, y))     # tone sets line thickness
+
+    azimuth = _m("ARCTAN2", sx, sy, (-680, 380))           # around world-up (Z)
+    cover = _coverage(azimuth, 380)
+    if cross:                                              # concentric latitude lines
+        hyp = _m("SQRT", _m("ADD", _m("MULTIPLY", sx, sx, (-760, 600)),
+                            _m("MULTIPLY", sy, sy, (-760, 520)), (-600, 560)),
+                 None, (-440, 560))
+        elevation = _m("ARCTAN2", sz, hyp, (-280, 560))
+        cover = _m("MAXIMUM", cover, _coverage(elevation, 560), (40, 470))
+
+    inv = nt.nodes.new("ShaderNodeMath")         # ink value = 1 - coverage
+    inv.location = (220, 320)
+    inv.operation = "SUBTRACT"
+    inv.inputs[0].default_value = 1.0
+    nt.links.new(cover, inv.inputs[1])
+
+    emi = nt.nodes.new("ShaderNodeEmission")
+    emi.location = (380, 120)
+    nt.links.new(inv.outputs["Value"], emi.inputs["Color"])
+    nt.links.new(emi.outputs["Emission"], out.inputs["Surface"])
+    return mat
+
+
+def apply_hatch(loaded, density=42.0, cross=False):
+    """Assign ONE shared shadow-hatch material to every mesh (and the ground, so cast
+    shadows hatch). The material reads each surface's own shading, so one instance
+    drives the whole scene. Returns the material."""
+    mat = make_hatch_material(density=density, cross=cross)
+    for node, obj in loaded.node_to_object.items():
+        if getattr(obj, "type", None) == "MESH":
+            obj.data.materials.clear()
+            obj.data.materials.append(mat)
+    g = _ground()
+    if g is not None:
+        g.data.materials.clear()
+        g.data.materials.append(mat)
+    return mat
+
+
+def set_hatch(loaded, density, cross):
+    """Live update: rebuild + reassign the hatch material with new params."""
+    apply_hatch(loaded, density=float(density), cross=bool(cross))
+
+
+# --- depth-cued line weight (tiered, survives vector export) ----------------
+# Classic drafting: near edges thick + dark, far edges thin + pale. A continuous
+# fade can't survive SVG/PDF (one colour + opacity per path), so we TIER it: each
+# depth band is a uniform GP material (grey) + uniform width, which exports cleanly
+# (one flat colour + width per path) AND is the authentic drafting convention.
+# Operates on the BAKED strokes (call after bake_line_art).
+def _ensure_tier_material(gp, i, col):
+    name = "BIR_Tier%d" % i
+    mat = bpy.data.materials.get(name)
+    if mat is None:
+        mat = bpy.data.materials.new(name)
+        bpy.data.materials.create_gpencil_data(mat)
+    if mat.grease_pencil is not None:
+        mat.grease_pencil.color = (col[0], col[1], col[2], 1.0)
+    for j, m in enumerate(gp.data.materials):
+        if m == mat:
+            return j
+    gp.data.materials.append(mat)
+    return len(gp.data.materials) - 1
+
+
+def apply_depth_cue(near_radius=0.03, far_radius=0.008, tiers=4, far_gray=0.6):
+    """Tier the baked Line Art by camera distance: near strokes thick + the line
+    colour, far strokes thin + faded toward grey. Returns True if applied. Requires
+    a baked Line Art (no-op otherwise)."""
+    gp = bpy.data.objects.get(_GP_NAME)
+    if gp is None or not is_line_art_baked():
+        return False
+    cam = bpy.context.scene.camera
+    if cam is None:
+        return False
+    import mathutils
+    cam_loc = cam.matrix_world.translation
+    mw = gp.matrix_world
+
+    strokes = [s for lay in gp.data.layers for fr in lay.frames
+               for s in fr.drawing.strokes]
+    if not strokes:
+        return False
+
+    def _depth(s):
+        pts = s.points
+        if not len(pts):
+            return 0.0
+        acc = mathutils.Vector((0.0, 0.0, 0.0))
+        for p in pts:
+            acc = acc + (mw @ p.position)
+        return ((acc / len(pts)) - cam_loc).length
+
+    depths = [_depth(s) for s in strokes]
+    dmin, dmax = min(depths), max(depths)
+    span = (dmax - dmin) or 1.0
+
+    base = get_line_art_color() or (0.0, 0.0, 0.0)
+    tiers = max(2, int(tiers))
+    tier_idx = []
+    for i in range(tiers):
+        t = i / float(tiers - 1)
+        col = tuple(base[k] * (1.0 - t) + far_gray * t for k in range(3))
+        tier_idx.append(_ensure_tier_material(gp, i, col))
+
+    for s, d in zip(strokes, depths):
+        t = (d - dmin) / span                     # 0 near .. 1 far
+        tier = min(tiers - 1, int(t * tiers))
+        s.material_index = tier_idx[tier]
+        r = max(0.0005, near_radius * (1.0 - t) + far_radius * t)
+        for p in s.points:
+            p.radius = r
+    for lay in gp.data.layers:
+        for fr in lay.frames:
+            try:
+                fr.drawing.tag_positions_changed()
+            except Exception:
+                pass
+    return True

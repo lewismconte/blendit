@@ -41,7 +41,6 @@ except Exception:
 _CAPTURE_DIR = None
 _STATUS = "Navigate to compose your shot, then press Enter to capture."
 _HUD_HANDLE = None
-_SHOT_N = 0
 _SETUP_TRIES = 0
 _KEYMAP_BOUND = False
 _FLY_MODE = True
@@ -162,31 +161,38 @@ def _run_busy(label, fn):
         _later()
 
 
-def _next_capture_path():
-    global _SHOT_N
-    _SHOT_N += 1
+def _export_path(subdir, prefix, ext):
+    """<output>/<subdir>/<prefix>_<stamp>.<ext> - the SAME dated naming the Revit
+    render uses (via contract.transport.stamped_name), with a counter suffix only if
+    a file already exists in the same second."""
+    from contract.transport import stamped_name
     base = _CAPTURE_DIR or os.path.expanduser("~")
-    capdir = os.path.join(base, "captures")
-    if not os.path.isdir(capdir):
-        try:
-            os.makedirs(capdir)
-        except Exception:
-            capdir = base
-    return os.path.join(capdir, "shot_%03d.png" % _SHOT_N)
-
-
-def _next_final_path():
-    """Timestamped path under <output>/finals for high-quality Render Final shots."""
-    import datetime
-    base = _CAPTURE_DIR or os.path.expanduser("~")
-    d = os.path.join(base, "finals")
+    d = os.path.join(base, subdir)
     if not os.path.isdir(d):
         try:
             os.makedirs(d)
         except Exception:
             d = base
-    stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    return os.path.join(d, "final_%s.png" % stamp)
+    path = os.path.join(d, stamped_name(prefix, ext))
+    if not os.path.exists(path):
+        return path
+    root, dot_ext = os.path.splitext(path)
+    i = 2
+    while os.path.exists("%s_%d%s" % (root, i, dot_ext)):
+        i += 1
+    return "%s_%d%s" % (root, i, dot_ext)
+
+
+def _next_capture_path():
+    return _export_path("captures", "capture", "png")
+
+
+def _next_final_path():
+    return _export_path("finals", "final", "png")
+
+
+def _next_vector_path(ext):
+    return _export_path("vectors", "drawing", ext)
 
 
 def _model_center():
@@ -393,6 +399,25 @@ def _update_cel_shades(self, context):
     npr.set_toon_shades(_LOADED, int(self.cel_shades))
 
 
+def _update_hatch(self, context):
+    if _SYNCING or _LOADED is None:
+        return
+    from blender.pipeline import npr
+    npr.set_hatch(_LOADED, self.hatch_density, self.hatch_cross)
+
+
+def _update_depth_cue(self, context):
+    if _SYNCING:
+        return
+    from blender.pipeline import npr
+    if self.depth_cue:
+        if npr.is_line_art_baked():
+            _run_busy("Depth cueing lines", npr.apply_depth_cue)
+        # else: it'll apply after the next Regenerate (which bakes first)
+    else:
+        _run_busy("Resetting line weight", _do_regenerate_lines)   # re-bake = uniform
+
+
 def _update_engine(self, context):
     if _SYNCING:
         return
@@ -479,6 +504,15 @@ def _apply_mode(mode):
     setup_engine(_SPEC)
     _sync_settings_from_scene()
     _apply_user_sun(getattr(bpy.context.scene, "bir", None))  # keep the user's sun
+    if mode in _LINE_MODES:
+        # The preset built a fresh procedural Line Art; let it trace once, then
+        # freeze it so export / render / capture reuse it instead of recomputing.
+        from blender.pipeline import npr
+        try:
+            bpy.context.view_layer.update()
+            npr.bake_line_art()
+        except Exception:
+            pass
 
 
 def _sync_settings_from_scene():
@@ -564,10 +598,11 @@ _MODE_ITEMS = [
     ("pen", "Pen", "Rhino-style technical pen: white fill, black lines"),
     ("sketch", "Sketch", "Hand-drawn wobbly lines on paper"),
     ("cel", "Cel / Anime", "Toon shading + outline"),
+    ("hatch", "Hatch", "Tonal shadow hatching (perspective-correct lines)"),
 ]
 
 _LIT_MODES = ("realistic", "white", "shadow", "specular")
-_LINE_MODES = ("linework", "pen", "sketch", "cel")
+_LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch")
 # Modes where real materials (and therefore textures) are visible. White/Shadow are
 # clay overrides; the NPR modes are line / flat. Kept in sync with material_library.
 _TEXTURED_MODES = ("realistic", "specular")
@@ -644,7 +679,7 @@ class BIR_Settings(bpy.types.PropertyGroup):
         description="Specular mode surface shine: 1 = mirror, 0 = matte",
         update=_update_gloss)
     # NPR (line / sketch / cel)
-    line_thickness: bpy.props.FloatProperty(name="Line Thickness", default=0.08,
+    line_thickness: bpy.props.FloatProperty(name="Line Thickness", default=0.05,
                                             min=0.001, max=3.0, precision=3,
                                             update=_update_line_thickness)
     line_crease: bpy.props.FloatProperty(
@@ -669,6 +704,19 @@ class BIR_Settings(bpy.types.PropertyGroup):
                                            update=_update_sketch)
     cel_shades: bpy.props.IntProperty(name="Shades", default=3, min=2, max=6,
                                       update=_update_cel_shades)
+    hatch_density: bpy.props.FloatProperty(
+        name="Hatch Density", default=42.0, min=8.0, max=160.0,
+        description="Hatch lines per radian (more = finer hatching)",
+        update=_update_hatch)
+    hatch_cross: bpy.props.BoolProperty(
+        name="Cross-hatch", default=False,
+        description="Add the perpendicular pass (concentric latitude lines) in the "
+                    "darker tones", update=_update_hatch)
+    depth_cue: bpy.props.BoolProperty(
+        name="Depth Cue", default=False,
+        description="Tier line weight by distance: near edges thick + dark, far "
+                    "edges thin + pale (survives SVG / PDF export). Applies on "
+                    "Regenerate", update=_update_depth_cue)
     final_samples: bpy.props.IntProperty(
         name="Final Samples", default=200, min=16, max=4096,
         description="Render samples for Render Final (higher = cleaner, slower)")
@@ -829,6 +877,8 @@ def _do_regenerate_lines():
     from blender.pipeline import npr
     if npr._active_lineart_mod() is None:
         return                      # not a line mode - don't move the camera
+    # Thaw any frozen bake so the new settings + camera take effect on a fresh trace.
+    npr.unbake_line_art()
     # Line Art is camera-relative, so first snap the camera to what you're looking
     # at; then push the current settings onto the modifier and force a re-trace.
     _run_in_view3d(lambda: bpy.ops.view3d.camera_to_view())
@@ -839,6 +889,10 @@ def _do_regenerate_lines():
         npr.set_line_art_occlusion(st.line_occlusion)
         npr.set_line_art_radius(st.line_thickness)
     npr.refresh_line_art()
+    npr.bake_line_art()         # freeze: export / render / capture now reuse it (fast)
+    st = getattr(bpy.context.scene, "bir", None)
+    if st is not None and st.depth_cue:
+        npr.apply_depth_cue()   # tier weight by distance (on the fresh bake)
     _enter_frame()              # show the export frame so the lines fill it (WYSIWYG)
 
 
@@ -910,6 +964,44 @@ class BIR_OT_open_captures(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _do_export_vector(fmt):
+    """Export the current line work as a scalable vector. Snap the camera to the
+    view first so the drawing matches what you see (Line Art is camera-relative),
+    then write to <output>/vectors and open it."""
+    global _STATUS
+    from blender.pipeline import vector_export
+    if not vector_export.has_line_art():
+        _STATUS = "Vector export needs a line mode (Linework / Pen / Sketch / Cel)."
+        return
+    _run_in_view3d(lambda: bpy.ops.view3d.camera_to_view())
+    _enter_frame()                       # WYSIWYG: the export frame == what you see
+    out = _next_vector_path(fmt)
+    try:
+        path = vector_export.export_vector(out, fmt)
+    except Exception as ex:
+        _STATUS = "Vector export failed: %s" % ex
+        print("Blendit: vector export failed: %s" % ex)
+        return
+    _STATUS = "Saved %s: %s" % (fmt.upper(), os.path.basename(path))
+    try:
+        os.startfile(path)               # open in browser / Illustrator / PDF viewer
+    except Exception:
+        pass
+
+
+class BIR_OT_export_vector(bpy.types.Operator):
+    bl_idname = "bir.export_vector"
+    bl_label = "Export Vector"
+    bl_description = ("Export the line work as a scalable vector file (SVG or PDF) "
+                     "- true paths you can edit in Illustrator / Inkscape / CAD")
+    fmt: bpy.props.StringProperty(default="svg", options={"HIDDEN"})
+
+    def execute(self, context):
+        fmt = (self.fmt or "svg").lower()
+        _run_busy("Exporting %s" % fmt.upper(), lambda: _do_export_vector(fmt))
+        return {"FINISHED"}
+
+
 class BIR_PT_main(bpy.types.Panel):
     bl_label = "Blendit"
     bl_space_type = "VIEW_3D"
@@ -951,8 +1043,9 @@ class BIR_PT_main(bpy.types.Panel):
                                st, "material_index", rows=6)
             mbox.label(text="Auto = match by name; pick a surface to override.")
 
-        # Light: for lit modes; sun direction also drives cel's toon shadows.
-        if mode in _LIT_MODES or mode in ("linework", "cel"):
+        # Light: for lit modes; sun direction also drives cel's toon shadows and
+        # the hatch tones (the shadows ARE the drawing).
+        if mode in _LIT_MODES or mode in ("linework", "cel", "hatch"):
             light = layout.box()
             light.label(text="Light", icon="LIGHT_SUN")
             if mode in _LIT_MODES or mode == "linework":
@@ -988,6 +1081,10 @@ class BIR_PT_main(bpy.types.Panel):
                 lines.prop(st, "sketch_amount", slider=True)
             if mode == "cel":
                 lines.prop(st, "cel_shades", slider=True)
+            if mode == "hatch":
+                hb = lines.column(align=True)
+                hb.prop(st, "hatch_density", slider=True)
+                hb.prop(st, "hatch_cross", toggle=True)
             # Re-trace settings: take effect on Regenerate (Line Art is camera-
             # relative, so you orbit, then regenerate for the new angle).
             col = lines.column(align=True)
@@ -995,9 +1092,17 @@ class BIR_PT_main(bpy.types.Panel):
             row = col.row(align=True)
             row.prop(st, "line_intersection", toggle=True)
             row.prop(st, "line_occlusion", toggle=True)
+            col.prop(st, "depth_cue", toggle=True, icon="MOD_THICKNESS")
             big = lines.column(align=True)
             big.scale_y = 1.3
             big.operator("bir.regenerate_lines", icon="FILE_REFRESH")
+            # Vector export: true scalable line drawings (SVG / PDF) of this view.
+            exp = lines.row(align=True)
+            exp.scale_y = 1.2
+            o = exp.operator("bir.export_vector", text="Export SVG", icon="EXPORT")
+            o.fmt = "svg"
+            o = exp.operator("bir.export_vector", text="PDF", icon="EXPORT")
+            o.fmt = "pdf"
 
         # View controls (frame / projection / gizmos / clipping) - always available.
         view = layout.box()
@@ -1015,7 +1120,8 @@ class BIR_PT_main(bpy.types.Panel):
 
 _CLASSES = (BIR_MaterialItem, BIR_Settings, BIR_UL_materials,
             BIR_OT_render_image, BIR_OT_render_final, BIR_OT_open_captures,
-            BIR_OT_toggle_mode, BIR_OT_regenerate_lines, BIR_PT_main)
+            BIR_OT_export_vector, BIR_OT_toggle_mode, BIR_OT_regenerate_lines,
+            BIR_PT_main)
 
 
 def _register_ui():

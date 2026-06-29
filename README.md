@@ -35,6 +35,10 @@ imports + renders it through the pipeline. What's built:
   active-view camera, and project sun, from the active 3D view.
 - **8 render modes** — Realistic, White / Clay, Shadow, Specular, plus four NPR
   modes: Linework, Pen, Sketch, Cel (Grease Pencil Line Art + toon shading).
+- **Vector export (SVG / PDF)** — in any line mode, export the Line Art as true
+  scalable vector paths (Illustrator / Inkscape / CAD-ready), camera-projected to
+  match the composed frame. From the Open Model panel or the headless `--vector`
+  flag. (cel exports outlines only — its colour bands are raster.)
 - **Cycles / EEVEE toggle**, samples, denoise, resolution, quality presets — all
   driven from the Revit ribbon.
 - **Explicit, honest workflow** — **Load Model** extracts the active 3D view (the
@@ -111,6 +115,10 @@ blender --background --python blender/headless/render.py -- ^
 ```
 
 `MODE`: realistic, white, shadow, specular, linework, pen, sketch, cel.
+
+**Vector line drawing:** add `--mode pen --vector svg` (or `pdf`) to write a
+scalable `.svg` / `.pdf` instead of a PNG (line modes only; the `--out` extension
+is swapped automatically).
 
 **All modes at once:** `blender --background --python tests/smoke_render.py`
 

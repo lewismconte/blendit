@@ -13,13 +13,13 @@ isn't loaded - press **Load Model** first.
 __title__ = "Render\nLoaded"
 __author__ = "Blendit"
 
-import datetime
 import os
 import subprocess
 
 import bir_bootstrap
 bir_bootstrap.ensure_paths()
 import bir_config
+from contract.transport import stamped_name
 from bir_ui import (report as _report, active_doc as _active_doc,
                     ensure_blender as _ensure_blender,
                     require_loaded as _require_loaded)
@@ -47,8 +47,7 @@ def main():
             os.makedirs(out_dir)
         except Exception:
             pass
-    stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    png = os.path.join(out_dir, "render_%s.png" % stamp)
+    png = os.path.join(out_dir, stamped_name("render", "png"))
     log_path = os.path.join(out_dir, "render.log")
     render_py = bir_bootstrap.render_script_path()
     # --open: Blender opens the PNG itself when done, so Revit isn't blocked waiting

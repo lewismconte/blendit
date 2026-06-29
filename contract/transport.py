@@ -7,6 +7,7 @@ KEEP THIS MODULE IRONPYTHON-2.7 SAFE: no f-strings, no type annotations in
 signatures, no dataclasses. Type hints are in comments. The on-disk Bundle
 (entry point scene_spec.json) is the cross-process contract.
 """
+import datetime
 import json
 import os
 
@@ -59,6 +60,21 @@ def read_scene_spec(bundle_ref):
 def bundle_dir_of(bundle_ref):
     # (str) -> str
     return os.path.dirname(bundle_ref) if bundle_ref.endswith(".json") else bundle_ref
+
+
+# --- output naming (shared so Revit + Blender exports match) ------------------
+# EVERY export - the Revit headless render, and the Blender captures / finals /
+# vector drawings - uses this one  <prefix>_<YYYY-MM-DD_HHMMSS>.<ext>  scheme, so
+# the files read identically and sort chronologically on both sides.
+def timestamp():
+    # () -> str   ; filename-safe local timestamp, second resolution
+    return datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+
+def stamped_name(prefix, ext):
+    # (str, str) -> str
+    # e.g. stamped_name("render", "png") -> "render_2026-06-29_103045.png"
+    return "%s_%s.%s" % (prefix, timestamp(), str(ext).lstrip("."))
 
 
 class MeshData(object):

@@ -75,6 +75,15 @@ def run_pipeline(bundle_ref, out_path, overrides=None):
     return _render(out_path, spec)
 
 
+def run_vector_pipeline(bundle_ref, out_path, fmt, overrides=None):
+    """Build the scene (in a line mode) and export the Line Art as SVG / PDF instead
+    of rendering a raster. The mode must be a line mode (linework/pen/sketch/cel) so
+    a Line Art GP exists to export."""
+    build_scene(bundle_ref, overrides)
+    from .vector_export import export_vector
+    return export_vector(out_path, fmt)
+
+
 def _render(out_path, spec):
     scene = bpy.context.scene
     scene.render.image_settings.file_format = "PNG"

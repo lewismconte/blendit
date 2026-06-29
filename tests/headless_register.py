@@ -34,7 +34,7 @@ print("registered:", ", ".join(c.__name__ for c in live._CLASSES))
 
 # The operators must exist.
 for op in ("regenerate_lines", "render_final", "open_captures",
-           "render_image", "toggle_mode"):
+           "render_image", "toggle_mode", "export_vector"):
     assert hasattr(bpy.ops.bir, op), "%s operator missing" % op
 
 # Touch every new property (exercises types/limits + update callbacks safely).
