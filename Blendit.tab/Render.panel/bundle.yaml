@@ -14,3 +14,4 @@ layout:
   - "---"
   - OpenRenders        # open the output folder
   - Settings           # configure everything
+  - About              # project info + GitHub + portfolio links

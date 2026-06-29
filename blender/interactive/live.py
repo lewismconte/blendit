@@ -403,7 +403,7 @@ def _update_hatch(self, context):
     if _SYNCING or _LOADED is None:
         return
     from blender.pipeline import npr
-    npr.set_hatch(_LOADED, self.hatch_density, self.hatch_cross)
+    npr.set_hatch(_LOADED, self.hatch_density, self.hatch_cross, self.hatch_weight)
 
 
 def _update_depth_cue(self, context):
@@ -705,8 +705,13 @@ class BIR_Settings(bpy.types.PropertyGroup):
     cel_shades: bpy.props.IntProperty(name="Shades", default=3, min=2, max=6,
                                       update=_update_cel_shades)
     hatch_density: bpy.props.FloatProperty(
-        name="Hatch Density", default=42.0, min=8.0, max=160.0,
-        description="Hatch lines per radian (more = finer hatching)",
+        name="Density", default=10.0, min=1.0, max=400.0, soft_max=60.0,
+        description="Hatch lines per metre on the surface (more = finer, denser)",
+        update=_update_hatch)
+    hatch_weight: bpy.props.FloatProperty(
+        name="Line Weight", default=1.0, min=0.05, max=2.0,
+        description="Thickness of each hatch line (lower = thinner; pair a low "
+                    "weight with high density for fine hatching)",
         update=_update_hatch)
     hatch_cross: bpy.props.BoolProperty(
         name="Cross-hatch", default=False,
@@ -1002,6 +1007,19 @@ class BIR_OT_export_vector(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _bir(context):
+    return getattr(context.scene, "bir", None)
+
+
+# Collapsible sub-panels keep the (growing) toolset compact: each section gets a
+# native expand/collapse arrow and Blender remembers its state. Less-used sections
+# (Sun, Re-trace, View) start collapsed via DEFAULT_CLOSED.
+class _Sub:
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Blendit"
+
+
 class BIR_PT_main(bpy.types.Panel):
     bl_label = "Blendit"
     bl_space_type = "VIEW_3D"
@@ -1010,7 +1028,7 @@ class BIR_PT_main(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        st = getattr(context.scene, "bir", None)
+        st = _bir(context)
         col = layout.column(align=True)
         col.scale_y = 1.3
         col.operator("bir.render_image", text="Capture", icon="RENDER_STILL")
@@ -1023,97 +1041,161 @@ class BIR_PT_main(bpy.types.Panel):
                      icon="SCREEN_BACK")
         if st is None:
             return
-        col.prop(st, "final_samples")         # tune Render Final quality (all modes)
-        mode = st.mode
         layout.separator()
         box = layout.box()
         box.label(text="View Mode", icon="SHADING_RENDERED")
         box.prop(st, "mode", text="")
-        if mode in _LIT_MODES:
+        if st.mode in _LIT_MODES:
             box.prop(st, "engine", text="")
         else:
             box.label(text="Engine: EEVEE")
+        box.prop(st, "final_samples")          # Render Final quality (all modes)
 
-        # Materials: per-material surface override. Only shown where textures are
-        # visible (Realistic / Specular); White/Shadow are clay, NPR is line/flat.
-        if mode in _TEXTURED_MODES and len(st.material_overrides):
-            mbox = layout.box()
-            mbox.label(text="Materials", icon="MATERIAL")
-            mbox.template_list("BIR_UL_materials", "", st, "material_overrides",
-                               st, "material_index", rows=6)
-            mbox.label(text="Auto = match by name; pick a surface to override.")
 
-        # Light: for lit modes; sun direction also drives cel's toon shadows and
-        # the hatch tones (the shadows ARE the drawing).
-        if mode in _LIT_MODES or mode in ("linework", "cel", "hatch"):
-            light = layout.box()
-            light.label(text="Light", icon="LIGHT_SUN")
-            if mode in _LIT_MODES or mode == "linework":
-                light.prop(st, "exposure", slider=True)
-                light.prop(st, "sky_strength", slider=True)
-                light.prop(st, "sun_strength", slider=True)
-            # Sun: Revit-style (date + time + location) or manual azimuth/altitude.
-            sun = light.box()
-            sun.prop(st, "sun_use_datetime", toggle=True, icon="LIGHT_SUN")
-            if st.sun_use_datetime:
-                sun.prop(st, "sun_time", slider=True)
-                dr = sun.row(align=True)
-                dr.prop(st, "sun_month")
-                dr.prop(st, "sun_day")
-                lr = sun.row(align=True)
-                lr.prop(st, "sun_lat")
-                lr.prop(st, "sun_lon")
-                sun.prop(st, "sun_tz")
-            else:
-                sun.prop(st, "sun_azimuth", slider=True)
-                sun.prop(st, "sun_altitude", slider=True)
-            light.prop(st, "sun_softness", slider=True)
-            if mode == "specular":
-                light.prop(st, "gloss", slider=True)
+class BIR_PT_materials(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_main"
+    bl_label = "Materials"
+    bl_options = {"DEFAULT_CLOSED"}
+    bl_order = 0
 
-        # NPR controls, per line / toon mode.
-        if mode in _LINE_MODES:
-            lines = layout.box()
-            lines.label(text="Lines", icon="GREASEPENCIL")
-            lines.prop(st, "line_thickness", slider=True)   # live
-            lines.prop(st, "line_color", text="")           # live colour
-            if mode == "sketch":
-                lines.prop(st, "sketch_amount", slider=True)
-            if mode == "cel":
-                lines.prop(st, "cel_shades", slider=True)
-            if mode == "hatch":
-                hb = lines.column(align=True)
-                hb.prop(st, "hatch_density", slider=True)
-                hb.prop(st, "hatch_cross", toggle=True)
-            # Re-trace settings: take effect on Regenerate (Line Art is camera-
-            # relative, so you orbit, then regenerate for the new angle).
-            col = lines.column(align=True)
-            col.prop(st, "line_crease", slider=True)
-            row = col.row(align=True)
-            row.prop(st, "line_intersection", toggle=True)
-            row.prop(st, "line_occlusion", toggle=True)
-            col.prop(st, "depth_cue", toggle=True, icon="MOD_THICKNESS")
-            big = lines.column(align=True)
-            big.scale_y = 1.3
-            big.operator("bir.regenerate_lines", icon="FILE_REFRESH")
-            # Vector export: true scalable line drawings (SVG / PDF) of this view.
-            exp = lines.row(align=True)
-            exp.scale_y = 1.2
-            o = exp.operator("bir.export_vector", text="Export SVG", icon="EXPORT")
-            o.fmt = "svg"
-            o = exp.operator("bir.export_vector", text="PDF", icon="EXPORT")
-            o.fmt = "pdf"
+    @classmethod
+    def poll(cls, context):
+        st = _bir(context)
+        return (st is not None and st.mode in _TEXTURED_MODES
+                and len(st.material_overrides))
 
-        # View controls (frame / projection / gizmos / clipping) - always available.
-        view = layout.box()
-        view.label(text="View", icon="VIEW_PERSPECTIVE")
-        fr = view.column(align=True)
+    def draw(self, context):
+        st = _bir(context)
+        layout = self.layout
+        layout.template_list("BIR_UL_materials", "", st, "material_overrides",
+                             st, "material_index", rows=6)
+        layout.label(text="Auto = match by name; pick a surface to override.")
+
+
+class BIR_PT_light(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_main"
+    bl_label = "Light"
+    bl_order = 1
+
+    @classmethod
+    def poll(cls, context):
+        st = _bir(context)
+        return st is not None and (st.mode in _LIT_MODES
+                                   or st.mode in ("linework", "cel", "hatch"))
+
+    def draw(self, context):
+        st = _bir(context)
+        layout = self.layout
+        if st.mode in _LIT_MODES or st.mode == "linework":
+            layout.prop(st, "exposure", slider=True)
+            layout.prop(st, "sky_strength", slider=True)
+            layout.prop(st, "sun_strength", slider=True)
+        layout.prop(st, "sun_softness", slider=True)
+        if st.mode == "specular":
+            layout.prop(st, "gloss", slider=True)
+
+
+class BIR_PT_sun(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_light"
+    bl_label = "Sun"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return BIR_PT_light.poll(context)
+
+    def draw(self, context):
+        st = _bir(context)
+        layout = self.layout
+        layout.prop(st, "sun_use_datetime", toggle=True, icon="LIGHT_SUN")
+        if st.sun_use_datetime:
+            layout.prop(st, "sun_time", slider=True)
+            r = layout.row(align=True)
+            r.prop(st, "sun_month")
+            r.prop(st, "sun_day")
+            r = layout.row(align=True)
+            r.prop(st, "sun_lat")
+            r.prop(st, "sun_lon")
+            layout.prop(st, "sun_tz")
+        else:
+            layout.prop(st, "sun_azimuth", slider=True)
+            layout.prop(st, "sun_altitude", slider=True)
+
+
+class BIR_PT_lines(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_main"
+    bl_label = "Lines"
+    bl_order = 2
+
+    @classmethod
+    def poll(cls, context):
+        st = _bir(context)
+        return st is not None and st.mode in _LINE_MODES
+
+    def draw(self, context):
+        st = _bir(context)
+        layout = self.layout
+        layout.prop(st, "line_thickness", slider=True)   # outline weight (live)
+        layout.prop(st, "line_color", text="")           # live colour
+        if st.mode == "sketch":
+            layout.prop(st, "sketch_amount", slider=True)
+        if st.mode == "cel":
+            layout.prop(st, "cel_shades", slider=True)
+        if st.mode == "hatch":
+            hb = layout.column(align=True)
+            hb.prop(st, "hatch_density", slider=True)
+            hb.prop(st, "hatch_weight", slider=True)
+            hb.prop(st, "hatch_cross", toggle=True)
+        big = layout.column(align=True)
+        big.scale_y = 1.3
+        big.operator("bir.regenerate_lines", icon="FILE_REFRESH")
+        exp = layout.row(align=True)
+        exp.scale_y = 1.2
+        o = exp.operator("bir.export_vector", text="Export SVG", icon="EXPORT")
+        o.fmt = "svg"
+        o = exp.operator("bir.export_vector", text="PDF", icon="EXPORT")
+        o.fmt = "pdf"
+
+
+class BIR_PT_lines_adv(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_lines"
+    bl_label = "Re-trace & Depth"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        st = _bir(context)
+        return st is not None and st.mode in _LINE_MODES
+
+    def draw(self, context):
+        st = _bir(context)
+        layout = self.layout
+        layout.prop(st, "line_crease", slider=True)
+        r = layout.row(align=True)
+        r.prop(st, "line_intersection", toggle=True)
+        r.prop(st, "line_occlusion", toggle=True)
+        layout.prop(st, "depth_cue", toggle=True, icon="MOD_THICKNESS")
+        layout.label(text="Apply with Regenerate.", icon="INFO")
+
+
+class BIR_PT_view(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_main"
+    bl_label = "View"
+    bl_options = {"DEFAULT_CLOSED"}
+    bl_order = 3
+
+    def draw(self, context):
+        st = _bir(context)
+        if st is None:
+            return
+        layout = self.layout
+        fr = layout.column(align=True)
         fr.scale_y = 1.2
         fr.prop(st, "frame_view", toggle=True, icon="CAMERA_DATA")   # navigable frame
-        view.prop(st, "aspect", text="")          # export frame shape == render aspect
-        view.prop(st, "view_persp", text="")
-        view.prop(st, "show_gizmos", toggle=True)
-        clip = view.column(align=True)
+        layout.prop(st, "aspect", text="")        # export frame shape == render aspect
+        layout.prop(st, "view_persp", text="")
+        layout.prop(st, "show_gizmos", toggle=True)
+        clip = layout.column(align=True)
         clip.prop(st, "clip_near", slider=True)
         clip.prop(st, "clip_far")
 
@@ -1121,7 +1203,8 @@ class BIR_PT_main(bpy.types.Panel):
 _CLASSES = (BIR_MaterialItem, BIR_Settings, BIR_UL_materials,
             BIR_OT_render_image, BIR_OT_render_final, BIR_OT_open_captures,
             BIR_OT_export_vector, BIR_OT_toggle_mode, BIR_OT_regenerate_lines,
-            BIR_PT_main)
+            BIR_PT_main, BIR_PT_materials, BIR_PT_light, BIR_PT_sun,
+            BIR_PT_lines, BIR_PT_lines_adv, BIR_PT_view)
 
 
 def _register_ui():

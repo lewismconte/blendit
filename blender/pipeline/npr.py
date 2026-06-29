@@ -488,8 +488,8 @@ def set_toon_shades(loaded, shades):
 _HATCH_BANDS = [(0.0, 1.0), (0.16, 0.55), (0.36, 0.32), (0.56, 0.15), (0.76, 0.0)]
 
 
-def make_hatch_material(name="BIR_Hatch", density=42.0, cross=False,
-                        bands=None, ao_distance=0.0):
+def make_hatch_material(name="BIR_Hatch", density=10.0, cross=False,
+                        bands=None, ao_distance=0.0, weight=1.0, cross_dark=0.45):
     bands = bands or _HATCH_BANDS
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
@@ -526,35 +526,41 @@ def make_hatch_material(name="BIR_Hatch", density=42.0, cross=False,
         nt.links.new(ao.outputs["AO"], mul_ao.inputs[1])
         tone = mul_ao.outputs["Value"]
 
-    # 2. tone -> line WIDTH, stepped (CONSTANT = hard tone bands)
+    # 2. tone -> line WIDTH, stepped (CONSTANT = hard tone bands). `weight` scales
+    # every band width, so the user can dial the lines thinner/thicker globally.
+    def _w(val):
+        return max(0.0, min(1.0, val * weight))
     ramp = nt.nodes.new("ShaderNodeValToRGB")
     ramp.location = (-480, -280)
     cr = ramp.color_ramp
     cr.interpolation = "CONSTANT"
     els = cr.elements
-    els[0].position, els[0].color = bands[0][0], (bands[0][1],) * 3 + (1.0,)
-    els[1].position, els[1].color = bands[1][0], (bands[1][1],) * 3 + (1.0,)
+    els[0].position, els[0].color = bands[0][0], (_w(bands[0][1]),) * 3 + (1.0,)
+    els[1].position, els[1].color = bands[1][0], (_w(bands[1][1]),) * 3 + (1.0,)
     for pos, val in bands[2:]:
         e = els.new(pos)
-        e.color = (val, val, val, 1.0)
+        e.color = (_w(val),) * 3 + (1.0,)
     nt.links.new(tone, ramp.inputs["Fac"])
     wbw = nt.nodes.new("ShaderNodeRGBToBW")
     wbw.location = (-280, -280)
     nt.links.new(ramp.outputs["Color"], wbw.inputs["Color"])
     width = wbw.outputs["Val"]
 
-    # Flat screen-space stripes converge WRONG under perspective (dead-parallel).
-    # Build the hatch in the VIEW-RAY ANGULAR domain instead - like a striped
-    # environment wrapped on the view sphere: stripes of constant azimuth around
-    # world-up are vertical lines that converge to the zenith / nadir vanishing
-    # points (true perspective). Cross-hatch uses the elevation angle (the
-    # concentric latitude lines).
+    # Phase 1 - SURFACE-ATTACHED strokes (triplanar world-space): the hatch lies in
+    # each surface's own plane, so vertical walls get verticals, floors / roofs /
+    # ground get in-plane strokes, and it all stays perspective-correct (the strokes
+    # live ON the surface). Phase 2 - a perpendicular CROSS-HATCH pass that NESTS in:
+    # it only switches on below `cross_dark` tone (like adding strokes in a darker
+    # TAM tier), so cross-hatch appears only in the shadows.
     geo = nt.nodes.new("ShaderNodeNewGeometry")
-    geo.location = (-1040, 400)
-    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
-    sep.location = (-860, 400)
-    nt.links.new(geo.outputs["Incoming"], sep.inputs["Vector"])
-    sx, sy, sz = sep.outputs["X"], sep.outputs["Y"], sep.outputs["Z"]
+    geo.location = (-1060, 520)
+    pos = nt.nodes.new("ShaderNodeSeparateXYZ")
+    pos.location = (-880, 600)
+    nt.links.new(geo.outputs["Position"], pos.inputs["Vector"])
+    nrm = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nrm.location = (-880, 400)
+    nt.links.new(geo.outputs["Normal"], nrm.inputs["Vector"])
+    px, py, pz = pos.outputs["X"], pos.outputs["Y"], pos.outputs["Z"]
 
     def _m(op, a, b=None, loc=(0, 0)):
         n = nt.nodes.new("ShaderNodeMath")
@@ -569,22 +575,42 @@ def make_hatch_material(name="BIR_Hatch", density=42.0, cross=False,
                 nt.links.new(v, n.inputs[idx])
         return n.outputs["Value"]
 
-    def _coverage(angle, y):
-        phase = _m("MULTIPLY", angle, density, (-520, y))
-        saw = _m("FRACT", phase, None, (-360, y))
-        return _m("LESS_THAN", saw, width, (-200, y))     # tone sets line thickness
+    # triplanar blend weights = |normal|^4 (sharpened so the dominant face wins),
+    # normalized so they sum to 1.
+    def _wt(comp, y):
+        return _m("POWER", _m("ABSOLUTE", comp, None, (-720, y)), 4.0, (-580, y))
+    wx = _wt(nrm.outputs["X"], 520)
+    wy = _wt(nrm.outputs["Y"], 440)
+    wz = _wt(nrm.outputs["Z"], 360)
+    wsum = _m("ADD", _m("ADD", wx, wy, (-440, 480)), wz, (-320, 470))
+    wxn = _m("DIVIDE", wx, wsum, (-180, 540))
+    wyn = _m("DIVIDE", wy, wsum, (-180, 460))
+    wzn = _m("DIVIDE", wz, wsum, (-180, 380))
 
-    azimuth = _m("ARCTAN2", sx, sy, (-680, 380))           # around world-up (Z)
-    cover = _coverage(azimuth, 380)
-    if cross:                                              # concentric latitude lines
-        hyp = _m("SQRT", _m("ADD", _m("MULTIPLY", sx, sx, (-760, 600)),
-                            _m("MULTIPLY", sy, sy, (-760, 520)), (-600, 560)),
-                 None, (-440, 560))
-        elevation = _m("ARCTAN2", sz, hyp, (-280, 560))
-        cover = _m("MAXIMUM", cover, _coverage(elevation, 560), (40, 470))
+    def _stripe(coord, w, y):
+        return _m("LESS_THAN",
+                  _m("FRACT", _m("MULTIPLY", coord, density, (40, y)),
+                     None, (180, y)),
+                  w, (320, y))
+
+    def _triplanar(cx, cy, cz, w, y0):
+        a = _m("MULTIPLY", _stripe(cx, w, y0), wxn, (480, y0))
+        b = _m("MULTIPLY", _stripe(cy, w, y0 - 80), wyn, (480, y0 - 80))
+        c = _m("MULTIPLY", _stripe(cz, w, y0 - 160), wzn, (480, y0 - 160))
+        return _m("ADD", _m("ADD", a, b, (640, y0 - 40)), c, (780, y0 - 80))
+
+    # primary lines run "vertically" in each plane (spaced along the in-plane
+    # horizontal coord): X-faces use Y, Y-faces use X, Z-faces (ground) use X.
+    primary = _triplanar(py, px, px, width, 760)
+    cover = primary
+    if cross:
+        cgate = _m("LESS_THAN", tone, cross_dark, (40, 200))   # 1 in the shadows
+        cwidth = _m("MULTIPLY", width, cgate, (220, 220))
+        crossm = _triplanar(pz, pz, py, cwidth, 260)           # perpendicular set
+        cover = _m("MAXIMUM", primary, crossm, (940, 500))
 
     inv = nt.nodes.new("ShaderNodeMath")         # ink value = 1 - coverage
-    inv.location = (220, 320)
+    inv.location = (1060, 320)
     inv.operation = "SUBTRACT"
     inv.inputs[0].default_value = 1.0
     nt.links.new(cover, inv.inputs[1])
@@ -596,11 +622,11 @@ def make_hatch_material(name="BIR_Hatch", density=42.0, cross=False,
     return mat
 
 
-def apply_hatch(loaded, density=42.0, cross=False):
+def apply_hatch(loaded, density=10.0, cross=False, weight=1.0):
     """Assign ONE shared shadow-hatch material to every mesh (and the ground, so cast
     shadows hatch). The material reads each surface's own shading, so one instance
     drives the whole scene. Returns the material."""
-    mat = make_hatch_material(density=density, cross=cross)
+    mat = make_hatch_material(density=density, cross=cross, weight=weight)
     for node, obj in loaded.node_to_object.items():
         if getattr(obj, "type", None) == "MESH":
             obj.data.materials.clear()
@@ -612,9 +638,10 @@ def apply_hatch(loaded, density=42.0, cross=False):
     return mat
 
 
-def set_hatch(loaded, density, cross):
+def set_hatch(loaded, density, cross, weight=1.0):
     """Live update: rebuild + reassign the hatch material with new params."""
-    apply_hatch(loaded, density=float(density), cross=bool(cross))
+    apply_hatch(loaded, density=float(density), cross=bool(cross),
+                weight=float(weight))
 
 
 # --- depth-cued line weight (tiered, survives vector export) ----------------

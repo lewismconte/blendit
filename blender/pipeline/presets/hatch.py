@@ -19,7 +19,7 @@ def apply(loaded, spec):
     _helpers.set_sun_energy(4.0)
     _helpers.set_sun_softness(1.0)
     npr.set_flat_view()                  # Standard transform: crisp tone bands
-    npr.apply_hatch(loaded, density=42.0, cross=False)
+    npr.apply_hatch(loaded, density=10.0, cross=False)
     npr.setup_line_art(radius=npr.default_line_radius(), color=(0.0, 0.0, 0.0),
                        crease_deg=70.0, thickness_factor=1.0)
 
