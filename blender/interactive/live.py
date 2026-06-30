@@ -213,7 +213,13 @@ def _set_nav_prefs():
         prefs = bpy.context.preferences
         prefs.use_preferences_save = False          # session-only; saved prefs untouched
         inp = prefs.inputs
-        inp.use_mouse_depth_navigate = True         # Auto Depth: pivot under cursor
+        # Auto Depth OFF. With lock-camera framing it takes the pan/orbit pivot from
+        # the depth UNDER THE CURSOR; the model is small and ringed by empty space, so
+        # the cursor is usually over the (far-clip) background and a single pan drags
+        # the camera clear across the scene - and it inflates view_distance after each
+        # orbit, compounding it. A fixed pivot, anchored to the model on frame-entry
+        # (see _anchor_view_pivot), pans predictably.
+        inp.use_mouse_depth_navigate = False
         inp.use_zoom_to_mouse = True
         inp.view_rotate_method = "TURNTABLE"
         inp.use_auto_perspective = False
@@ -1372,9 +1378,26 @@ def _set_frame_view(on):
             if r3d is not None:
                 if on:
                     r3d.view_perspective = "CAMERA"
+                    _anchor_view_pivot(r3d)       # model-scaled pan / orbit
                 elif r3d.view_perspective == "CAMERA":
                     r3d.view_perspective = "PERSP"
         area.tag_redraw()
+
+
+def _anchor_view_pivot(r3d):
+    """Anchor orbit / pan to the model so navigation is model-scaled, not driven by
+    the far background. Sets the view pivot to the model centre and the orbit radius
+    to the camera->centre distance (with Auto Depth off, this is what governs how far
+    a pan moves)."""
+    cam = bpy.context.scene.camera
+    center = _model_center()
+    if cam is None or center is None:
+        return
+    try:
+        r3d.view_location = center
+        r3d.view_distance = max(0.1, (cam.matrix_world.translation - center).length)
+    except Exception:
+        pass
 
 
 def _enter_frame():
