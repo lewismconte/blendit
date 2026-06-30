@@ -45,6 +45,10 @@ imports + renders it through the pipeline. What's built:
   flag. (cel exports outlines only — its colour bands are raster.)
 - **Cycles / EEVEE toggle**, samples, denoise, resolution, quality presets — all
   driven from the Revit ribbon.
+- **Camera & framing** — auto-fits the model from the Revit view angle, with an
+  optional **two-point perspective** correction (keep verticals vertical), a working
+  **orthographic** mode, and manual framing (focal length, padding, lens-shift) in
+  Open Model. Two-point is off by default to stay faithful to the framed view.
 - **Explicit, honest workflow** — **Load Model** extracts the active 3D view (the
   one slow step, with a progress bar); **Open Model** opens it in an interactive
   Blender session (stripped "Fly" review UI, live Look + per-mode sliders, WYSIWYG
@@ -98,8 +102,6 @@ catalog-installable). The Blender pipeline and the shared contract ship inside i
 Honest gaps in this release (none block a one-click render; all are on the
 roadmap):
 
-- **Two-point perspective** (vertical-line correction) is carried in the contract
-  but not yet applied on the Blender camera — verticals can converge on tall shots.
 - **Sky is physical (Nishita) or solid** — HDRI-based lighting isn't wired yet.
 - **Cycles renders on CPU by default** — for fast High/Final renders, enable a GPU
   in Blender's Preferences → System once. EEVEE (the default) is realtime regardless.
@@ -115,10 +117,12 @@ roadmap):
 python tests/fixtures/build_fixture.py
 blender --background --python blender/headless/render.py -- ^
     --bundle tests/fixtures --out out/render.png ^
-    [--engine CYCLES|EEVEE] [--mode MODE] [--samples N]
+    [--engine CYCLES|EEVEE] [--mode MODE] [--samples N] ^
+    [--camera perspective|orthographic] [--two-point on|off]
 ```
 
-`MODE`: realistic, white, shadow, specular, linework, pen, sketch, cel.
+`MODE`: realistic, white, shadow, specular, linework, pen, sketch, cel, hatch.
+`--two-point on` levels the camera so verticals stay vertical (off by default).
 
 **Vector line drawing:** add `--mode pen --vector svg` (or `pdf`) to write a
 scalable `.svg` / `.pdf` instead of a PNG (line modes only; the `--out` extension

@@ -127,7 +127,15 @@ class Camera:
     sensor_mm: float = 36.0
     clip_start: float = 0.1
     clip_end: float = 10000.0
-    two_point_perspective: bool = True   # keep verticals vertical (architectural)
+    # Two-point perspective keeps verticals vertical (levels the camera). Revit's 3D
+    # view is NOT two-point, so this is an opt-in correction, off by default to stay
+    # faithful to the view the user framed.
+    two_point_perspective: bool = False
+    # Framing controls (not extracted from Revit): padding around the model, and a
+    # lens shift that slides the frame without tilting (so it preserves two-point).
+    framing_margin: float = 1.12
+    shift_x: float = 0.0
+    shift_y: float = 0.0
 
 
 @dataclass

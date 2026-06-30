@@ -79,7 +79,7 @@ def build_spec():
         camera=Camera(name="3D - Fixture", type=CameraType.PERSPECTIVE,
                       position=[28.0, -34.0, 16.0], target=[5.0, 5.0, 5.0],
                       up=[0.0, 0.0, 1.0], fov_degrees=45.0,
-                      two_point_perspective=True),
+                      two_point_perspective=False),
         sun=Sun(mode="geographic", latitude=51.5074, longitude=-0.1278,
                 date="2026-06-21", time="16:30", timezone=1.0,
                 daylight_saving=True, strength=1.0, angle_degrees=0.526),

@@ -94,7 +94,10 @@
         "sensor_mm": { "type": "number" },
         "clip_start": { "type": "number" },
         "clip_end": { "type": "number" },
-        "two_point_perspective": { "type": "boolean" }
+        "two_point_perspective": { "type": "boolean" },
+        "framing_margin": { "type": "number" },
+        "shift_x": { "type": "number" },
+        "shift_y": { "type": "number" }
       }
     },
     "sun": {

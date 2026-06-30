@@ -101,7 +101,10 @@
     "sensor_mm": 36.0,
     "clip_start": 0.1,
     "clip_end": 10000.0,
-    "two_point_perspective": true
+    "two_point_perspective": false,
+    "framing_margin": 1.12,
+    "shift_x": 0.0,
+    "shift_y": 0.0
   },
   "sun": {
     "mode": "geographic",

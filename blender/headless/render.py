@@ -34,6 +34,8 @@ def _parse_args():
     p.add_argument("--samples", type=int)
     p.add_argument("--camera", choices=["perspective", "orthographic"],
                    help="override the view's camera type")
+    p.add_argument("--two-point", dest="two_point", choices=["on", "off"],
+                   help="keep verticals vertical (level the camera); off by default")
     p.add_argument("--vector", choices=["svg", "pdf"],
                    help="export the line work as scalable SVG / PDF instead of a "
                         "raster (needs a line mode: linework/pen/sketch/cel)")
@@ -60,6 +62,8 @@ def main():
         overrides["samples"] = ns.samples
     if ns.camera:
         overrides["camera_type"] = ns.camera
+    if ns.two_point:
+        overrides["two_point"] = (ns.two_point == "on")
 
     # Resolve to absolute paths: Blender relativizes render.filepath against its
     # own base (not the process CWD), so a relative --out would land off-repo.

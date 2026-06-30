@@ -258,9 +258,43 @@ def _update_mode(self, context):
     _run_busy("Switching to %s" % mode, lambda: _apply_mode(mode))
 
 
+def _aspect_value(aspect):
+    aw, ah = _ASPECTS.get(aspect, (16, 9))
+    return float(aw) / float(ah)
+
+
+def _reapply_camera():
+    """Re-apply projection + framing to the real scene camera from the View panel,
+    preserving the angle the user has navigated to. This is what makes Orthographic
+    actually orthographic (the capture/render camera, not just the viewport nav) and
+    drives Two-Point + the manual Framing controls."""
+    from blender.pipeline import camera as cam
+    st = getattr(bpy.context.scene, "bir", None)
+    co = bpy.context.scene.camera
+    if st is None or co is None:
+        return
+    cam.reframe_current(
+        co,
+        ortho=(st.view_persp == "ORTHO"),
+        two_point=st.two_point,
+        aspect=_aspect_value(st.aspect),
+        margin=st.framing_margin,
+        focal_mm=(st.focal_length if st.focal_length > 0.0 else None),
+        shift_y=st.lens_shift)
+    for win, area in _iter_view3d():
+        area.tag_redraw()
+
+
+def _update_camera(self, context):
+    if _SYNCING:
+        return
+    _reapply_camera()
+
+
 def _update_view_persp(self, context):
     if _SYNCING:
         return
+    _reapply_camera()                          # drive the REAL camera projection
     for win, area in _iter_view3d():
         for space in area.spaces:
             if space.type != "VIEW_3D":
@@ -374,6 +408,7 @@ def _update_aspect(self, context):
     if _SYNCING:
         return
     _apply_aspect(self.aspect)
+    _reapply_camera()                    # the frame shape changed -> refit framing
     for win, area in _iter_view3d():     # refresh the passepartout frame
         area.tag_redraw()
 
@@ -759,6 +794,27 @@ class BIR_Settings(bpy.types.PropertyGroup):
                ("1:1", "1:1 Square", "Square"),
                ("9:16", "9:16 Tall", "Portrait")],
         update=_update_aspect)
+    two_point: bpy.props.BoolProperty(
+        name="Two-Point", default=False,
+        description="Keep verticals vertical by levelling the camera. Revit's 3D "
+                    "view is NOT two-point, so this is a deliberate architectural "
+                    "correction (the camera drops to the model's mid height)",
+        update=_update_camera)
+    framing_margin: bpy.props.FloatProperty(
+        name="Padding", default=1.12, min=1.0, max=3.0, step=2, precision=2,
+        description="Empty space around the model when auto-framing "
+                    "(1.0 = tight to the edges)",
+        update=_update_camera)
+    focal_length: bpy.props.FloatProperty(
+        name="Focal (mm)", default=0.0, min=0.0, max=300.0, step=50, precision=1,
+        description="Override the lens focal length in millimetres "
+                    "(0 = use the view's field of view)",
+        update=_update_camera)
+    lens_shift: bpy.props.FloatProperty(
+        name="Lens Shift", default=0.0, min=-1.0, max=1.0, step=2, precision=3,
+        description="Slide the frame up / down without tilting the camera "
+                    "(raises the vantage while keeping verticals vertical)",
+        update=_update_camera)
 
 
 # --- materials list (surface overrides) ------------------------------------
@@ -1194,17 +1250,37 @@ class BIR_PT_view(_Sub, bpy.types.Panel):
         fr.prop(st, "frame_view", toggle=True, icon="CAMERA_DATA")   # navigable frame
         layout.prop(st, "aspect", text="")        # export frame shape == render aspect
         layout.prop(st, "view_persp", text="")
+        tp = layout.row(align=True)
+        tp.enabled = (st.view_persp == "PERSP")   # two-point is a perspective fix
+        tp.prop(st, "two_point", toggle=True, icon="MOD_LATTICE")
         layout.prop(st, "show_gizmos", toggle=True)
         clip = layout.column(align=True)
         clip.prop(st, "clip_near", slider=True)
         clip.prop(st, "clip_far")
 
 
+class BIR_PT_framing(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_view"
+    bl_label = "Framing"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        st = _bir(context)
+        if st is None:
+            return
+        col = self.layout.column(align=True)
+        col.prop(st, "framing_margin", slider=True)
+        col.prop(st, "focal_length")
+        shift = self.layout.column(align=True)
+        shift.enabled = (st.view_persp == "PERSP")   # lens shift is perspective-only
+        shift.prop(st, "lens_shift", slider=True)
+
+
 _CLASSES = (BIR_MaterialItem, BIR_Settings, BIR_UL_materials,
             BIR_OT_render_image, BIR_OT_render_final, BIR_OT_open_captures,
             BIR_OT_export_vector, BIR_OT_toggle_mode, BIR_OT_regenerate_lines,
             BIR_PT_main, BIR_PT_materials, BIR_PT_light, BIR_PT_sun,
-            BIR_PT_lines, BIR_PT_lines_adv, BIR_PT_view)
+            BIR_PT_lines, BIR_PT_lines_adv, BIR_PT_view, BIR_PT_framing)
 
 
 def _register_ui():
@@ -1495,6 +1571,28 @@ def _model_label(bundle_ref):
         return "model"
 
 
+def _init_camera_panel():
+    """One-time: reflect the camera the scene was built with into the View panel, so
+    the Projection / Two-Point / Framing controls start in sync with what's on screen
+    (the camera was already configured by setup_camera from the same spec values)."""
+    global _SYNCING
+    st = getattr(bpy.context.scene, "bir", None)
+    if st is None or _SPEC is None:
+        return
+    c = _SPEC.get("camera", {})
+    _SYNCING = True
+    try:
+        st.view_persp = "ORTHO" if str(c.get("type")) == "orthographic" else "PERSP"
+        st.two_point = bool(c.get("two_point_perspective", False))
+        st.framing_margin = float(c.get("framing_margin", 1.12))
+        st.focal_length = float(c.get("focal_length_mm") or 0.0)
+        st.lens_shift = float(c.get("shift_y", 0.0))
+    except Exception:
+        pass
+    finally:
+        _SYNCING = False
+
+
 def _init_sun():
     """One-time: seed the Sun panel from the Revit-extracted location + sun, then
     apply. Defaults to By-Date-Time (a usable, draggable sun) when a location is
@@ -1616,6 +1714,7 @@ def _deferred_build():
         _SPEC["_override_dir"] = _OVERRIDE_DIR
 
     _init_sun()                              # seed + apply the Revit-style sun once
+    _init_camera_panel()                     # reflect the built camera into the View panel
     _init_materials()                        # build the Materials list + apply saved overrides
     _register_hud()                          # ensure the HUD survived open_mainfile
     _BUSY = False

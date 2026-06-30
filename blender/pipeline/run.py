@@ -104,3 +104,6 @@ def _apply_overrides(spec, overrides):
         r["resolution"] = list(overrides["resolution"])
     if overrides.get("camera_type"):
         spec.setdefault("camera", {})["type"] = str(overrides["camera_type"])
+    if overrides.get("two_point") is not None:
+        spec.setdefault("camera", {})["two_point_perspective"] = bool(
+            overrides["two_point"])

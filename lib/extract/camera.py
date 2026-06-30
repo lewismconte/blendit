@@ -16,7 +16,9 @@ def extract_camera(view3d):
         "name": _name(view3d), "type": "perspective",
         "position": [0.0, 0.0, 0.0], "target": [0.0, 1.0, 0.0],
         "up": [0.0, 0.0, 1.0], "fov_degrees": 50.0,
-        "two_point_perspective": True,
+        # Off by default: stay faithful to the Revit view angle. Two-point is an
+        # opt-in correction the user turns on in Open Model / Settings.
+        "two_point_perspective": False,
     }
     try:
         o = view3d.GetOrientation()
