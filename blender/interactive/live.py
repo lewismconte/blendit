@@ -282,6 +282,15 @@ def _update_camera(self, context):
     _reapply_camera()
 
 
+def _snap_camera_to_view():
+    """Snap the export camera to the current view, then re-assert the chosen
+    Projection so Two-Point / Ortho actually land in the capture / render / export.
+    camera_to_view() copies the raw viewport orientation onto the camera, which would
+    otherwise undo the levelling when composing outside Frame View."""
+    _run_in_view3d(lambda: bpy.ops.view3d.camera_to_view())
+    _reapply_camera()
+
+
 def _update_gizmos(self, context):
     if _SYNCING:
         return
@@ -878,7 +887,7 @@ class BIR_OT_render_image(bpy.types.Operator):
 
     def execute(self, context):
         global _STATUS
-        _run_in_view3d(lambda: bpy.ops.view3d.camera_to_view())
+        _snap_camera_to_view()
         out = _next_capture_path()
         sc = context.scene
         sc.render.image_settings.file_format = "PNG"
@@ -912,7 +921,7 @@ def _do_regenerate_lines():
     npr.unbake_line_art()
     # Line Art is camera-relative, so first snap the camera to what you're looking
     # at; then push the current settings onto the modifier and force a re-trace.
-    _run_in_view3d(lambda: bpy.ops.view3d.camera_to_view())
+    _snap_camera_to_view()
     st = getattr(bpy.context.scene, "bir", None)
     if st is not None:
         npr.set_line_art_crease(st.line_crease)
@@ -944,7 +953,7 @@ def _do_render_final():
     # Cycles; NPR (Line Art / toon) stays EEVEE since that's where it renders.
     sc = bpy.context.scene
     st = getattr(sc, "bir", None)
-    _run_in_view3d(lambda: bpy.ops.view3d.camera_to_view())
+    _snap_camera_to_view()
     _enter_frame()
     samples = int(st.final_samples) if st is not None else 200
     npr_mode = bool(st is not None and st.mode in _LINE_MODES)
@@ -1004,7 +1013,7 @@ def _do_export_vector(fmt):
     if not vector_export.has_line_art():
         _STATUS = "Vector export needs a line mode (Linework / Pen / Sketch / Cel)."
         return
-    _run_in_view3d(lambda: bpy.ops.view3d.camera_to_view())
+    _snap_camera_to_view()
     _enter_frame()                       # WYSIWYG: the export frame == what you see
     out = _next_vector_path(fmt)
     try:
