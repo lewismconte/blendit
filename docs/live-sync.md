@@ -4,6 +4,9 @@
 > here is built yet. This is the Phase-4 "true live link" the bridge was designed
 > for (CLAUDE.md §11). Develop or trim later. Sibling of [entourage.md](entourage.md)
 > — that doc is the *content*, this is how content + edits *stream* live.
+>
+> **→ For the build-ready, code-grounded plan (assumptions verified, decisions
+> closed, spikes to run first), see [live-sync-plan.md](live-sync-plan.md).**
 
 ## The idea
 
