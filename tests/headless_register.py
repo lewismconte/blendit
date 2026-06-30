@@ -39,7 +39,7 @@ for op in ("regenerate_lines", "render_final", "open_captures",
 
 # Touch every new property (exercises types/limits + update callbacks safely).
 st = bpy.context.scene.bir
-st.view_persp = "ORTHO"
+st.projection = "ORTHO"
 st.show_gizmos = True
 st.clip_near = 0.1
 st.clip_far = 5000.0
@@ -60,12 +60,11 @@ st.sun_day = 21
 st.sun_time = 14.0
 st.frame_view = True     # drives _update_sun_time -> sun_calc (safe with no scene sun)
 st.aspect = "1:1"      # exercises _apply_aspect (sets render resolution)
-st.two_point = True       # camera controls: _update_camera -> _reapply_camera (no-op, no cam)
-st.framing_margin = 1.5
+st.projection = "TWO_POINT"   # camera controls: _update_camera -> _reapply_camera (no-op, no cam)
 st.focal_length = 35.0
 st.lens_shift = 0.2
-assert st.two_point is True and abs(st.lens_shift - 0.2) < 1e-3
-assert st.view_persp == "ORTHO"
+assert st.projection == "TWO_POINT" and abs(st.lens_shift - 0.2) < 1e-3
+st.projection = "ORTHO"
 assert st.show_gizmos is True
 assert abs(st.line_crease - 55.0) < 1e-3
 assert bpy.context.scene.render.resolution_x == bpy.context.scene.render.resolution_y, \

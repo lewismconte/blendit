@@ -20,16 +20,22 @@ Two extras layer on top of the auto-fit:
     and `shift_x/shift_y` (lens shift: slides the frame without tilting, so it keeps
     verticals vertical). These are framing controls, not extracted from Revit.
 
-`reframe_current()` re-applies all of this to an existing camera at its CURRENT
-orientation, for the interactive Open Model toggles (which must preserve the angle
-the user has navigated to).
+`convert_projection()` changes an existing camera's projection IN PLACE (the
+interactive Open Model "Projection" dropdown: Perspective / Two-Point / Ortho),
+preserving the user's composition instead of re-running the auto-fit.
 """
 import math
 
 import bpy
 import mathutils
+from bpy_extras.object_utils import world_to_camera_view
 
 DEFAULT_MARGIN = 1.12
+
+# Interactive projection modes (the Open Model "Projection" dropdown).
+PERSP = "PERSP"
+TWO_POINT = "TWO_POINT"
+ORTHO = "ORTHO"
 
 
 def setup_camera(spec, scale):
@@ -66,36 +72,92 @@ def setup_camera(spec, scale):
     return cam_obj
 
 
-def reframe_current(cam_obj, ortho, two_point, aspect,
-                    margin=DEFAULT_MARGIN, focal_mm=None, shift_x=0.0, shift_y=0.0):
-    """Re-apply projection + framing to an EXISTING camera at its CURRENT orientation.
+def convert_projection(cam_obj, mode, focal_mm=None, extra_shift=0.0):
+    """Change an existing camera's projection IN PLACE for the interactive session.
 
-    Used by the interactive Open Model toggles, which must keep the angle the user
-    has navigated to (rather than snapping back to the Revit view direction). Reuses
-    the same framing core as setup_camera."""
+    Unlike the initial auto-fit, this preserves the camera's position (and, for
+    PERSP / ORTHO, its orientation), so the user's composition survives the switch:
+
+      * PERSP     - plain perspective at the current pose.
+      * TWO_POINT - keep the eye where it is, LEVEL the optical axis (so verticals
+                    stay vertical) and apply a vertical lens shift to recompose the
+                    model back into frame. The architect's tilt-shift, not a
+                    fly-to-mid-height reframe.
+      * ORTHO     - parallel projection at the current pose, scaled to match the
+                    perspective's apparent size (no size jump on toggle).
+
+    `focal_mm` (>0) sets the lens; `extra_shift` is an additional manual vertical
+    lens shift layered on top.
+    """
+    bpy.context.view_layer.update()   # matrix_world is lazy; read the true pose
     cam_data = cam_obj.data
-    bpy.context.view_layer.update()   # matrix_world is lazy; read the true orientation
     q = cam_obj.matrix_world.to_quaternion()
-    forward = (q @ mathutils.Vector((0.0, 0.0, -1.0))).normalized()   # camera looks -Z
-    up = (q @ mathutils.Vector((0.0, 1.0, 0.0))).normalized()
+    forward = (q @ mathutils.Vector((0.0, 0.0, -1.0))).normalized()
+    pos = cam_obj.matrix_world.translation.copy()
 
-    if ortho:
+    bb = _scene_bbox()
+    center = (bb[0] + bb[1]) * 0.5 if bb is not None else pos + forward * 10.0
+    dist = max(0.1, (center - pos).dot(forward))   # distance to the subject
+
+    if focal_mm:
+        cam_data.type = "PERSP"        # a lens is only meaningful in perspective
+        cam_data.lens = float(focal_mm)
+    hfov = cam_data.angle              # perspective FOV (valid whatever the type)
+
+    if mode == ORTHO:
         cam_data.type = "ORTHO"
-    else:
-        cam_data.type = "PERSP"
-        if focal_mm:
-            cam_data.lens = float(focal_mm)
+        # ortho_scale spans the larger sensor dimension, same reference as
+        # cam_data.angle, so matching the perspective frustum at the subject keeps
+        # the apparent size across the toggle. Then shift to re-centre the model:
+        # this keeps the pose (so it round-trips cleanly back to perspective) and
+        # stays centred even from a levelled two-point pose that no longer points
+        # straight at the model.
+        cam_data.ortho_scale = 2.0 * dist * math.tan(hfov / 2.0)
+        sx, sy = _recompose_shift(cam_obj, center, axes="xy")
+        cam_data.shift_x = sx
+        cam_data.shift_y = sy + float(extra_shift)
+        return
 
-    if two_point and not ortho:
+    cam_data.type = "PERSP"
+    if mode == TWO_POINT:
         leveled = _level(forward)
         if leveled is not None:
-            forward, up = leveled, mathutils.Vector((0.0, 0.0, 1.0))
+            cam_obj.rotation_euler = leveled.to_track_quat("-Z", "Y").to_euler()
+            cam_data.shift_x = 0.0
+            _sx, sy = _recompose_shift(cam_obj, center, axes="y")
+            cam_data.shift_y = sy + float(extra_shift)
+            return
+        # near-vertical view: two-point is undefined, fall back to plain perspective.
+    cam_data.shift_x = 0.0
+    cam_data.shift_y = float(extra_shift)
 
-    _frame_to_geometry(cam_obj, cam_data, forward, up, aspect, 1.0, {},
-                       ortho=ortho, margin=margin)
-    cam_data.shift_x = float(shift_x)
-    cam_data.shift_y = float(shift_y)
-    return cam_obj
+
+def _recompose_shift(cam_obj, target, axes="y"):
+    """Lens shift(s) that re-centre `target` in frame. Exact and aspect-aware via
+    world_to_camera_view; the projection is linear in each shift, so two samples
+    solve it. Returns (shift_x, shift_y); only the requested axes are solved (the
+    rest come back 0). Used to recompose after levelling (two-point, vertical only)
+    and to re-centre orthographic (both axes)."""
+    scene = bpy.context.scene
+    cam_data = cam_obj.data
+    cam_data.shift_x = 0.0
+    cam_data.shift_y = 0.0
+    bpy.context.view_layer.update()
+    c0 = world_to_camera_view(scene, cam_obj, target)
+    cam_data.shift_x = 0.1
+    cam_data.shift_y = 0.1
+    bpy.context.view_layer.update()
+    c1 = world_to_camera_view(scene, cam_obj, target)
+    cam_data.shift_x = 0.0
+    cam_data.shift_y = 0.0
+    sx = sy = 0.0
+    if "x" in axes:
+        slope = (c1.x - c0.x) / 0.1
+        sx = (0.5 - c0.x) / slope if abs(slope) > 1e-6 else 0.0
+    if "y" in axes:
+        slope = (c1.y - c0.y) / 0.1
+        sy = (0.5 - c0.y) / slope if abs(slope) > 1e-6 else 0.0
+    return sx, sy
 
 
 def _frame_to_geometry(cam_obj, cam_data, forward, up_hint, aspect, scale, cspec,

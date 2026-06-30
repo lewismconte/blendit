@@ -45,10 +45,11 @@ imports + renders it through the pipeline. What's built:
   flag. (cel exports outlines only — its colour bands are raster.)
 - **Cycles / EEVEE toggle**, samples, denoise, resolution, quality presets — all
   driven from the Revit ribbon.
-- **Camera & framing** — auto-fits the model from the Revit view angle, with an
-  optional **two-point perspective** correction (keep verticals vertical), a working
-  **orthographic** mode, and manual framing (focal length, padding, lens-shift) in
-  Open Model. Two-point is off by default to stay faithful to the framed view.
+- **Camera & framing** — auto-fits the model from the Revit view angle. In Open
+  Model a single **Projection** dropdown switches Perspective / **Two-Point** (level
+  the camera so verticals stay vertical, tilt-shift in place) / **Orthographic**
+  without throwing away your composition, plus manual focal-length and lens-shift
+  controls. Two-point is off by default to stay faithful to the framed Revit view.
 - **Explicit, honest workflow** — **Load Model** extracts the active 3D view (the
   one slow step, with a progress bar); **Open Model** opens it in an interactive
   Blender session (stripped "Fly" review UI, live Look + per-mode sliders, WYSIWYG

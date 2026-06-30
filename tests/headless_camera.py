@@ -85,18 +85,50 @@ def main():
     assert cam.data.ortho_scale > 0.0, "ortho_scale not set"
     print("ortho: type=%s scale=%.2f" % (cam.data.type, cam.data.ortho_scale))
 
-    # --- reframe_current flips an existing camera's projection in place -----------
-    cam_mod.reframe_current(cam, ortho=False, two_point=False, aspect=16.0 / 9.0)
-    assert cam.data.type == "PERSP", "reframe_current did not switch to PERSP"
-    cam_mod.reframe_current(cam, ortho=True, two_point=False, aspect=16.0 / 9.0)
-    assert cam.data.type == "ORTHO", "reframe_current did not switch to ORTHO"
-    cam_mod.reframe_current(cam, ortho=False, two_point=True, aspect=16.0 / 9.0)
+    # --- convert_projection changes projection IN PLACE (keeps the pose) ----------
+    # Build a faithful perspective shot, then convert and assert the camera POSITION
+    # is preserved (no auto-fit jump) while the projection / verticals change.
+    build_scene(_FIX, overrides={"mode": "white", "engine": "EEVEE",
+                                 "camera_type": "perspective", "two_point": False})
     _sync()
-    assert abs(_cam_forward().z) < 1e-3, "reframe_current two-point not level"
-    print("reframe_current: PERSP/ORTHO/two-point toggles OK")
+    cam = bpy.context.scene.camera
+    pos0 = cam.matrix_world.translation.copy()
 
-    # --- the interactive wrapper: panel state drives the REAL camera --------------
-    # This is the reported bug: in Open Model, picking Orthographic must change the
+    from blender.pipeline.camera import _scene_bbox
+
+    def _center_ndc():
+        bb = _scene_bbox()
+        return world_to_camera_view(bpy.context.scene, cam, (bb[0] + bb[1]) * 0.5)
+
+    cam_mod.convert_projection(cam, cam_mod.ORTHO)
+    _sync()
+    assert cam.data.type == "ORTHO", "convert_projection did not switch to ORTHO"
+    assert (cam.matrix_world.translation - pos0).length < 1e-4, (
+        "ORTHO conversion moved the camera (should be in place)")
+    assert cam.data.ortho_scale > 0.0, "ortho_scale not set on conversion"
+    c = _center_ndc()
+    assert abs(c.x - 0.5) < 0.02 and abs(c.y - 0.5) < 0.02, "ORTHO not centred"
+
+    cam_mod.convert_projection(cam, cam_mod.TWO_POINT)
+    _sync()
+    assert cam.data.type == "PERSP", "TWO_POINT must be a perspective camera"
+    assert abs(_cam_forward().z) < 1e-3, "TWO_POINT did not level the camera"
+    assert (cam.matrix_world.translation - pos0).length < 1e-4, (
+        "TWO_POINT moved the eye (tilt-shift must keep the position)")
+    assert abs(_center_ndc().y - 0.5) < 0.02, "TWO_POINT did not recompose the centre"
+
+    # the hard case: ORTHO from a levelled two-point pose must still re-centre
+    cam_mod.convert_projection(cam, cam_mod.ORTHO)
+    _sync()
+    c = _center_ndc()
+    assert abs(c.x - 0.5) < 0.02 and abs(c.y - 0.5) < 0.02, (
+        "ORTHO from a two-point pose did not re-centre (x=%.3f y=%.3f)" % (c.x, c.y))
+    assert (cam.matrix_world.translation - pos0).length < 1e-4, (
+        "ORTHO from two-point moved the camera")
+    print("convert_projection: in-place ORTHO (re-centred) + tilt-shift TWO_POINT OK")
+
+    # --- the interactive dropdown drives the REAL camera --------------------------
+    # The reported bug: in Open Model, picking a projection must change the
     # capture/render camera, not just the viewport navigation.
     import blender.interactive.live as live
     for cls in live._CLASSES:
@@ -108,14 +140,13 @@ def main():
     build_scene(_FIX, overrides={"mode": "white", "engine": "EEVEE",
                                  "camera_type": "perspective"})
     st = bpy.context.scene.bir
-    st.view_persp = "ORTHO"          # -> _update_view_persp -> _reapply_camera
+    st.projection = "ORTHO"          # -> _update_camera -> _reapply_camera
     assert bpy.context.scene.camera.data.type == "ORTHO", (
         "interactive Orthographic did not reach the render camera")
-    st.view_persp = "PERSP"
-    st.two_point = True              # -> _update_camera -> _reapply_camera
+    st.projection = "TWO_POINT"
     _sync()
     assert abs(_cam_forward().z) < 1e-3, "interactive Two-Point did not level the camera"
-    print("interactive wrapper: Projection + Two-Point drive the real camera OK")
+    print("interactive dropdown: Projection drives the real camera OK")
 
     print("CAMERA OK")
 
