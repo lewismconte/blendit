@@ -1,5 +1,9 @@
 # Blendit
 
+<p align="center">
+  <img src="media/blendit_workflow_readme.gif" alt="Blendit: one click in Revit, rendered in Blender" />
+</p>
+
 > One click in Revit → the current 3D view, in Blender, looking good.
 
 An open-source, one-click renderer built as a **bridge** between Revit and
