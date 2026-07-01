@@ -31,7 +31,7 @@ REVIT (IronPython 2.7)  ──bundle──▶  BLENDER (CPython 3 / bpy)
 
 ## Status
 
-**Working end to end on real models, verified on Blender 5.0.** One click in Revit
+**Working end to end on real models, verified on Blender 5.0 / 5.1.** One click in Revit
 extracts the active 3D view, writes a binary glTF (`.glb`) bundle, and Blender
 imports + renders it through the pipeline. What's built:
 
@@ -50,6 +50,11 @@ imports + renders it through the pipeline. What's built:
   the camera so verticals stay vertical, tilt-shift in place) / **Orthographic**
   without throwing away your composition, plus manual focal-length and lens-shift
   controls. Two-point is off by default to stay faithful to the framed Revit view.
+- **Atmosphere / Weather** — a procedural **volumetric cloud** + sky system in Open
+  Model (collapsible panels): seven meteorological presets (fair cumulus → stratus
+  overcast → cumulonimbus), a live sky/sun/haze atmosphere, box or 360° ring domain,
+  and Draft/Medium/High volume quality. Fully procedural (no assets); renders best in
+  Cycles (Render Final).
 - **Explicit, honest workflow** — **Load Model** extracts the active 3D view (the
   one slow step, with a progress bar); **Open Model** opens it in an interactive
   Blender session (stripped "Fly" review UI, live Look + per-mode sliders, WYSIWYG

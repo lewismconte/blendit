@@ -1257,14 +1257,162 @@ class BIR_PT_framing(_Sub, bpy.types.Panel):
         shift.prop(st, "lens_shift", slider=True)
 
 
+# --- Atmosphere / Weather (vendored volumetric clouds; see clouds.py) -------
+def _clouds(context):
+    return getattr(context.scene, "bir_clouds", None)
+
+
+class BIR_PT_atmosphere(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_main"
+    bl_label = "Atmosphere / Weather"
+    bl_options = {"DEFAULT_CLOSED"}
+    bl_order = 4
+
+    def draw(self, context):
+        s = _clouds(context)
+        if s is None:
+            return
+        layout = self.layout
+        col = layout.column(align=True)
+        col.prop(s, "preset")
+        row = col.row(align=True)
+        row.scale_y = 1.3
+        row.operator("bir.clouds_generate", icon="OUTLINER_OB_VOLUME")
+        col.prop(s, "live_update")
+        layout.operator("bir.clouds_add_sky", icon="LIGHT_SUN")
+        layout.label(text="Clouds render best in Cycles.", icon="INFO")
+
+
+class BIR_PT_atmo_shape(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_atmosphere"
+    bl_label = "Cloud Shape"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        s = _clouds(context)
+        if s is None:
+            return
+        c = self.layout.column(align=True)
+        c.prop(s, "coverage", slider=True)
+        c.prop(s, "density")
+        c.prop(s, "shape_scale")
+        c.prop(s, "billow", slider=True)
+        c.prop(s, "erosion", slider=True)
+        r = c.row(align=True)
+        r.prop(s, "height_base", slider=True)
+        r.prop(s, "height_top", slider=True)
+
+
+class BIR_PT_atmo_detail(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_atmosphere"
+    bl_label = "Detail & Light"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        s = _clouds(context)
+        if s is None:
+            return
+        c = self.layout.column(align=True)
+        c.prop(s, "detail")
+        c.prop(s, "roughness", slider=True)
+        c.prop(s, "anisotropy", slider=True)
+        c.prop(s, "stretch")
+        c.prop(s, "shear")
+
+
+class BIR_PT_atmo_domain(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_atmosphere"
+    bl_label = "Domain"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        s = _clouds(context)
+        if s is None:
+            return
+        layout = self.layout
+        layout.prop(s, "domain_shape", expand=True)
+        if s.domain_shape == "TORUS":
+            layout.prop(s, "ring_radius")
+            layout.prop(s, "ring_tube")
+            layout.prop(s, "ring_height")
+            layout.prop(s, "ring_center_cam")
+        else:
+            layout.prop(s, "size")
+        layout.prop(s, "altitude")
+
+
+class BIR_PT_atmo_sky(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_atmosphere"
+    bl_label = "Sky & Sun"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        s = _clouds(context)
+        if s is None:
+            return
+        layout = self.layout
+        col = layout.column(align=True)
+        col.prop(s, "sun_elevation")
+        col.prop(s, "sun_azimuth")
+        col = layout.column(align=True)
+        col.prop(s, "sun_strength")
+        col.prop(s, "sun_warmth", slider=True)
+        col = layout.column(align=True)
+        col.prop(s, "sky_strength")
+        col.prop(s, "haze")
+        col.prop(s, "dust")
+        layout.prop(s, "exposure")
+
+
+class BIR_PT_atmo_anim(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_atmosphere"
+    bl_label = "Animation"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        s = _clouds(context)
+        if s is None:
+            return
+        layout = self.layout
+        layout.prop(s, "animate")
+        sub = layout.column(align=True)
+        sub.active = s.animate
+        sub.prop(s, "wind")
+        sub.prop(s, "evolve")
+
+
+class BIR_PT_atmo_render(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_atmosphere"
+    bl_label = "Render Quality"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        s = _clouds(context)
+        if s is None:
+            return
+        layout = self.layout
+        layout.prop(s, "quality")
+        layout.operator("bir.clouds_quality", icon="MODIFIER")
+
+
+_ATMO_CLASSES = (BIR_PT_atmosphere, BIR_PT_atmo_shape, BIR_PT_atmo_detail,
+                 BIR_PT_atmo_domain, BIR_PT_atmo_sky, BIR_PT_atmo_anim,
+                 BIR_PT_atmo_render)
+
 _CLASSES = (BIR_MaterialItem, BIR_Settings, BIR_UL_materials,
             BIR_OT_render_image, BIR_OT_render_final, BIR_OT_open_captures,
             BIR_OT_export_vector, BIR_OT_toggle_mode, BIR_OT_regenerate_lines,
             BIR_PT_main, BIR_PT_materials, BIR_PT_light, BIR_PT_sun,
-            BIR_PT_lines, BIR_PT_lines_adv, BIR_PT_view, BIR_PT_framing)
+            BIR_PT_lines, BIR_PT_lines_adv, BIR_PT_view, BIR_PT_framing) + _ATMO_CLASSES
 
 
 def _register_ui():
+    from blender.interactive import clouds
+    for cls in clouds.CLOUD_CLASSES:      # settings + operators (before the panels)
+        try:
+            bpy.utils.register_class(cls)
+        except Exception:
+            pass
     for cls in _CLASSES:
         try:
             bpy.utils.register_class(cls)
@@ -1272,6 +1420,10 @@ def _register_ui():
             pass
     try:
         bpy.types.Scene.bir = bpy.props.PointerProperty(type=BIR_Settings)
+    except Exception:
+        pass
+    try:
+        bpy.types.Scene.bir_clouds = bpy.props.PointerProperty(type=clouds.BIR_CloudSettings)
     except Exception:
         pass
 

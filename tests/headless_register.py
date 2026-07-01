@@ -27,15 +27,29 @@ print("preset registry matches RENDER_MODES (%d modes): %s"
       % (len(RENDER_MODES), sorted(RENDER_MODES)))
 
 # Register for real, letting any definition error raise.
+import blender.interactive.clouds as clouds
+for cls in clouds.CLOUD_CLASSES:                 # vendored atmosphere/cloud tool
+    bpy.utils.register_class(cls)
 for cls in live._CLASSES:
     bpy.utils.register_class(cls)
 bpy.types.Scene.bir = bpy.props.PointerProperty(type=live.BIR_Settings)
-print("registered:", ", ".join(c.__name__ for c in live._CLASSES))
+bpy.types.Scene.bir_clouds = bpy.props.PointerProperty(type=clouds.BIR_CloudSettings)
+print("registered:", ", ".join(c.__name__ for c in clouds.CLOUD_CLASSES + live._CLASSES))
 
 # The operators must exist.
 for op in ("regenerate_lines", "render_final", "open_captures",
-           "render_image", "toggle_mode", "export_vector"):
+           "render_image", "toggle_mode", "export_vector",
+           "clouds_generate", "clouds_add_sky", "clouds_quality"):
     assert hasattr(bpy.ops.bir, op), "%s operator missing" % op
+
+# Atmosphere settings: preset switch + a slider round-trip (exercises callbacks).
+cl = bpy.context.scene.bir_clouds
+cl.preset = "CUMULONIMBUS"
+assert cl.density > 0.0 and cl.height_top > cl.height_base, "preset did not apply"
+cl.coverage = 0.6
+assert abs(cl.coverage - 0.6) < 1e-3
+print("atmosphere settings OK (preset=%s, %d presets)"
+      % (cl.preset, len(clouds.PRESETS)))
 
 # Touch every new property (exercises types/limits + update callbacks safely).
 st = bpy.context.scene.bir
