@@ -19,7 +19,7 @@ import blender.interactive.live as live   # importable now (no main() on import)
 # the modes the contract declares (RENDER_MODES). Importing the presets package
 # registers all of them; this fails loudly if the registry and the contract drift.
 from blender.pipeline.presets import preset_names
-from contract.scene_spec import RENDER_MODES
+from bir_contract.scene_spec import RENDER_MODES
 assert set(preset_names()) == set(RENDER_MODES), (
     "preset registry %s != contract RENDER_MODES %s"
     % (sorted(preset_names()), sorted(RENDER_MODES)))

@@ -26,7 +26,7 @@ import os
 import struct
 import sys
 
-from contract.transport import Exporter, write_scene_spec, register_exporter
+from bir_contract.transport import Exporter, write_scene_spec, register_exporter
 
 # glTF constant enums
 _FLOAT = 5126

@@ -5,7 +5,7 @@ Work through it in phases, **confirm the contract before building on it**, and
 produce a runnable demo at the end of each phase.
 
 > The long code listings for the contract live in their real files now — see
-> [`contract/`](contract/) and [`docs/contract.md`](docs/contract.md). This file
+> [`bir_contract/`](bir_contract/) and [`docs/contract.md`](docs/contract.md). This file
 > keeps the narrative, the constraints, and the working agreement.
 
 ---
@@ -96,8 +96,8 @@ disk). Everything else is swappable behind the interface.
 
 **Shared**
 - Define the data contract once, validatable on both sides: dataclasses
-  ([`contract/scene_spec.py`](contract/scene_spec.py)) + JSON schema
-  ([`contract/scene_spec.schema.json`](contract/scene_spec.schema.json)).
+  ([`bir_contract/scene_spec.py`](bir_contract/scene_spec.py)) + JSON schema
+  ([`bir_contract/scene_spec.schema.json`](bir_contract/scene_spec.schema.json)).
 
 ---
 
@@ -115,9 +115,9 @@ blendit/                         # = the extension root (clone as Blendit.extens
 ├─ Blendit.tab/Render.panel/LoadModel.pushbutton/  # ribbon; + OpenModel / RenderLoadedModel
 ├─ lib/                          # IronPython 2.7-safe Revit-side code (auto on sys.path)
 │   ├─ bir_bootstrap · bir_config · bir_export · bir_ui
-│   ├─ extract/                  # tessellation, materials, camera, sun
-│   └─ transports/gltf/exporter.py
-├─ contract/                     # the shared data contract (the seam)
+│   ├─ bir_extract/                  # tessellation, materials, camera, sun
+│   └─ bir_transports/gltf/exporter.py
+├─ bir_contract/                     # the shared data contract (the seam)
 │   ├─ scene_spec.py             # dataclasses (CPython 3 side + tests)
 │   ├─ scene_spec.schema.json    # authoritative cross-language schema
 │   └─ transport.py              # Exporter/Importer interface (IPy2.7 safe)
@@ -125,7 +125,7 @@ blendit/                         # = the extension root (clone as Blendit.extens
 │   ├─ headless/render.py        # bpy entry point: argv → import → pipeline → render
 │   ├─ interactive/live.py       # the Open Model session
 │   ├─ pipeline/                 # import_bundle · materials · world · camera · look · presets/
-│   └─ transports/gltf/importer.py
+│   └─ bir_transports/gltf/importer.py
 ├─ tests/                        # fixture bundle + headless pipeline tests (no Revit)
 └─ docs/                         # contract.md · dev-loop.md
 ```
@@ -134,7 +134,7 @@ blendit/                         # = the extension root (clone as Blendit.extens
 
 ## 6. The transport layer (the seam — keep it stable)
 
-One interface in [`contract/transport.py`](contract/transport.py):
+One interface in [`bir_contract/transport.py`](bir_contract/transport.py):
 
 - `Exporter.export(spec_dict, meshes, out_dir) -> bundle_ref` (Revit side).
 - `Importer.load(bundle_ref) -> LoadedScene` (Blender side).
@@ -178,7 +178,7 @@ From the **active 3D view**, extract into a schema-conformant `spec_dict` +
   applies ×0.3048 **once**. Carry the project base point for round-trips.
 - **Render settings:** chosen mode, engine, resolution.
 
-The pushbutton `script.py` is thin: it calls `lib/extract/` then the active
+The pushbutton `script.py` is thin: it calls `lib/bir_extract/` then the active
 transport's `export`.
 
 ---
@@ -239,7 +239,7 @@ length · subtle bloom + vignette · optional shadow-catcher ground · denoise
 
 ## 11. Build phases
 
-- **Phase 0 — Scaffolding & vertical slice.** Repo + `contract/`; a pyRevit
+- **Phase 0 — Scaffolding & vertical slice.** Repo + `bir_contract/`; a pyRevit
   button that exports a **single box**; a Blender headless script that imports it
   and renders a flat PNG. Prove the seam end to end.
 - **Phase 1 — v1 MVP.** Full extraction → bundle → Blender → **Realistic** preset
@@ -260,7 +260,7 @@ length · subtle bloom + vignette · optional shadow-catcher ground · denoise
 - **Never** load Blender/`bpy` into Revit's process or `DllImport` Blender into
   .NET. Cross-process via the transport only.
 - Revit-side code must **import cleanly outside Revit** (guard API imports).
-- Keep `contract/` (SceneSpec + transport) **stable and documented**; treat
+- Keep `bir_contract/` (SceneSpec + transport) **stable and documented**; treat
   changes as deliberate, versioned events. Everything else builds on it.
 - Pin the `bpy`/Blender Python version; document it in the README.
 - After each phase, deliver a **runnable demo + a short "how to run it" note** for
@@ -283,11 +283,11 @@ The starter contract code (Appendix A), reference material (Appendix B),
 transport interface + run model (Appendix C), and the material-mapping spec
 (Appendix D) are tracked as their real files / docs:
 
-- **A — SceneSpec contract:** [`contract/scene_spec.py`](contract/scene_spec.py),
-  [`contract/scene_spec.schema.json`](contract/scene_spec.schema.json),
+- **A — SceneSpec contract:** [`bir_contract/scene_spec.py`](bir_contract/scene_spec.py),
+  [`bir_contract/scene_spec.schema.json`](bir_contract/scene_spec.schema.json),
   documented in [`docs/contract.md`](docs/contract.md).
-- **C — Transport + run model:** [`contract/transport.py`](contract/transport.py),
-  the importer/exporter under `blender/transports/` and `lib/transports/`, run
+- **C — Transport + run model:** [`bir_contract/transport.py`](bir_contract/transport.py),
+  the importer/exporter under `blender/transports/` and `lib/bir_transports/`, run
   model in [`docs/dev-loop.md`](docs/dev-loop.md).
 - **B & D — references + material mapping:** captured in
   [`docs/contract.md`](docs/contract.md) and to be realized in

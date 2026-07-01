@@ -19,9 +19,9 @@
    Re-run **Load Model** after you change the model. Open / Render do nothing until
    a model is loaded (they tell you to Load first).
 
-### How the Revit side reaches `contract/`
+### How the Revit side reaches `bir_contract/`
 
-The exporter does `from contract.transport import ...`, but `contract/` lives at
+The exporter does `from bir_contract.transport import ...`, but `bir_contract/` lives at
 the repo root — outside the extension's `lib/` (which pyRevit auto-adds to
 `sys.path`). **Resolved:** `lib/bir_bootstrap.py` prepends the repo root (and
 `lib/`) to `sys.path`, and the pushbutton calls `bir_bootstrap.ensure_paths()`

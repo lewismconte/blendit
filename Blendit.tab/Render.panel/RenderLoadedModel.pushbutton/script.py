@@ -19,7 +19,7 @@ import subprocess
 import bir_bootstrap
 bir_bootstrap.ensure_paths()
 import bir_config
-from contract.transport import stamped_name
+from bir_contract.transport import stamped_name
 from bir_ui import (report as _report, active_doc as _active_doc,
                     ensure_blender as _ensure_blender,
                     require_loaded as _require_loaded)

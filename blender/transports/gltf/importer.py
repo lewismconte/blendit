@@ -3,7 +3,7 @@ import os
 
 import bpy
 
-from contract.transport import (
+from bir_contract.transport import (
     Importer, LoadedScene, read_scene_spec, bundle_dir_of,
     check_contract_version, register_importer,
 )

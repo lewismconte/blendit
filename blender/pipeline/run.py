@@ -33,7 +33,7 @@ def import_scene(bundle_ref, overrides=None):
     # Where per-material surface overrides (the N-panel Materials list) are read from
     # - a Blender-side runtime annotation, next to the bundle, not a contract field.
     try:
-        from contract.transport import bundle_dir_of
+        from bir_contract.transport import bundle_dir_of
         spec["_override_dir"] = bundle_dir_of(bundle_ref)
     except Exception:
         pass

@@ -17,12 +17,12 @@ for p in (_ROOT, _REVIT_LIB):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from contract.scene_spec import (  # noqa: E402
+from bir_contract.scene_spec import (  # noqa: E402
     SceneSpec, Source, Units, CoordinateSystem, Geometry, Element, Material,
     Camera, Sun, World, RenderSettings, Engine, RenderMode, SkyType, CameraType,
 )
-from contract.transport import MeshData, get_exporter  # noqa: E402
-import transports.gltf.exporter  # noqa: E402,F401  (registers the "gltf" exporter)
+from bir_contract.transport import MeshData, get_exporter  # noqa: E402
+import bir_transports.gltf.exporter  # noqa: E402,F401  (registers the "gltf" exporter)
 
 
 def _box(node, x0, y0, z0, x1, y1, z1, material_id):

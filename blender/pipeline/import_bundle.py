@@ -7,7 +7,7 @@ distances — so nothing is double-scaled.
 """
 import bpy
 
-from contract.transport import get_importer, has_importer, read_scene_spec
+from bir_contract.transport import get_importer, has_importer, read_scene_spec
 
 # Importing this registers the glTF importer as a side effect. New transports
 # (e.g. USD) register the same way - the pipeline picks one by geometry.transport.

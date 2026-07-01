@@ -7,7 +7,7 @@ when the functions are actually called with a live doc.
 """
 import datetime
 
-from extract import _compat
+from bir_extract import _compat
 
 DB = _compat.DB
 
@@ -32,7 +32,7 @@ def active_3d_view(doc):
 def build_scene_spec(doc, view3d, render_overrides=None, progress=None):
     """-> (spec_dict, meshes). Geometry/materials/camera/sun from the 3D view.
     `progress(done, total)` is forwarded to the geometry pass for a progress bar."""
-    from extract import geometry, materials, camera, sun
+    from bir_extract import geometry, materials, camera, sun
 
     meshes, elements, material_ids = geometry.extract_geometry(
         doc, view3d, progress=progress)

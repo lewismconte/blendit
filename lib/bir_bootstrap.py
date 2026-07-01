@@ -1,9 +1,9 @@
 """Revit-side bootstrap helpers (IronPython 2.7 safe).
 
 Resolves the things the pushbutton needs from the pyRevit environment:
-  * put the repo's `contract/` package on sys.path (it lives at the repo root,
-    outside the extension's auto-added lib/) -- the single-source-of-truth way
-    for the Revit side to reach the seam, instead of vendoring transport.py.
+  * put the repo's `bir_contract/` package on sys.path (it lives at the repo
+    root, outside the extension's auto-added lib/) -- the single-source-of-truth
+    way for the Revit side to reach the seam, instead of vendoring transport.py.
   * locate `blender.exe` and the headless render script.
   * pick an output directory for the bundle + PNG.
 
@@ -17,12 +17,16 @@ import tempfile
 
 _LIB_DIR = os.path.dirname(os.path.abspath(__file__))
 # The repo root IS the extension root (.tab at root, for the pyRevit catalog):
-# lib/ + blender/ + contract/ all live one level up from lib/.
+# lib/ + blender/ + bir_contract/ all live one level up from lib/.
 REPO_ROOT = os.path.abspath(os.path.join(_LIB_DIR, ".."))
 
 
 def ensure_paths():
-    """Make `contract` and the extension's `transports` importable."""
+    """Make `bir_contract` and the extension's `bir_transports` importable.
+
+    All Blendit packages exposed to pyRevit's SHARED sys.path carry the bir_
+    prefix, so they can never collide with (or shadow) another extension's
+    generically-named packages in the same IronPython engine."""
     for p in (REPO_ROOT, _LIB_DIR):
         if p not in sys.path:
             sys.path.insert(0, p)

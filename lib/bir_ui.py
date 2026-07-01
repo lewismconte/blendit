@@ -141,7 +141,7 @@ def ensure_3d_view(doc, report=None):
     if doc is None:
         return True
     try:
-        from extract import revit_extract
+        from bir_extract import revit_extract
         if revit_extract.active_3d_view(doc) is not None:
             return True
     except Exception:

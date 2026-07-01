@@ -6,7 +6,7 @@ location are carried along for reference / future geographic mode.
 """
 import math
 
-from extract import _compat
+from bir_extract import _compat
 
 DB = _compat.DB
 

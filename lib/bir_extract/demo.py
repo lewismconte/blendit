@@ -6,7 +6,7 @@ fallback used only when there is no active document (e.g. headless/dev) so the s
 can still be proven end to end. It emits plain dicts (NOT the CPython scene_spec
 dataclasses, which can't run under IPy) - the Revit-side mirror of tests/fixtures.
 """
-from contract.transport import MeshData
+from bir_contract.transport import MeshData
 
 
 def _box(node, x0, y0, z0, x1, y1, z1, material_id):

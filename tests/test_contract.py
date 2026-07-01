@@ -16,11 +16,11 @@ _ROOT = os.path.abspath(os.path.join(_HERE, ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from contract import scene_spec, transport
+from bir_contract import scene_spec, transport
 
 
 def _schema_modes():
-    path = os.path.join(_ROOT, "contract", "scene_spec.schema.json")
+    path = os.path.join(_ROOT, "bir_contract", "scene_spec.schema.json")
     with open(path) as f:
         schema = json.load(f)
     return schema["$defs"]["render"]["properties"]["mode"]["enum"]

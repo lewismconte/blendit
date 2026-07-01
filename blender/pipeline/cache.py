@@ -15,7 +15,7 @@ import os
 
 import bpy
 
-from contract.transport import read_scene_spec, LoadedScene
+from bir_contract.transport import read_scene_spec, LoadedScene
 
 
 def save_clean_blend(path):

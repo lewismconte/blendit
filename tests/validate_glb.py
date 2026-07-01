@@ -15,8 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 
-from contract.transport import MeshData
-from transports.gltf.exporter import GltfExporter
+from bir_contract.transport import MeshData
+from bir_transports.gltf.exporter import GltfExporter
 
 
 def _unit_box():

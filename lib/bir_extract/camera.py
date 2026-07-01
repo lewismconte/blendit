@@ -6,7 +6,7 @@ the view's bounding-box centre. Exact perspective FOV isn't cleanly exposed by t
 Revit API, so we use a sane architectural default for now (TODO: derive precisely
 from the crop region).
 """
-from extract import _compat
+from bir_extract import _compat
 
 DB = _compat.DB
 

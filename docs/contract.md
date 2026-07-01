@@ -7,9 +7,9 @@ documented**; treat changes as deliberate, versioned events.
 
 | File | Runtime | Role |
 |---|---|---|
-| [`contract/scene_spec.schema.json`](../contract/scene_spec.schema.json) | both | **Authoritative.** Cross-language JSON Schema (draft 2020-12). |
-| [`contract/scene_spec.py`](../contract/scene_spec.py) | CPython 3 (Blender + tests) | Typed convenience representation (dataclasses + enums). |
-| [`contract/transport.py`](../contract/transport.py) | IronPython 2.7 **and** CPython 3 | The Exporter/Importer interface + bundle read/write helpers. |
+| [`bir_contract/scene_spec.schema.json`](../bir_contract/scene_spec.schema.json) | both | **Authoritative.** Cross-language JSON Schema (draft 2020-12). |
+| [`bir_contract/scene_spec.py`](../bir_contract/scene_spec.py) | CPython 3 (Blender + tests) | Typed convenience representation (dataclasses + enums). |
+| [`bir_contract/transport.py`](../bir_contract/transport.py) | IronPython 2.7 **and** CPython 3 | The Exporter/Importer interface + bundle read/write helpers. |
 
 The Revit side runs under **IronPython 2.7**, which has no `dataclasses` — so on
 the Revit side, build plain `dict`s that conform to the schema and write JSON.

@@ -25,11 +25,11 @@ round-trip back to Revit as a *lightweight placeholder* (params, not mesh), so t
 
 The bridge was built for this; three load-bearing pieces already exist:
 
-- **Extraction is already per-element.** [geometry.py](../lib/extract/geometry.py)
+- **Extraction is already per-element.** [geometry.py](../lib/bir_extract/geometry.py)
   loops elements and tessellates each independently. Delta extraction = run that
   loop on a *dirty id set* instead of the whole view.
 - **Stable node keys are the join.** Every mesh is named
-  `<category>_<elementId>` ([geometry.py:67](../lib/extract/geometry.py)) —
+  `<category>_<elementId>` ([geometry.py:67](../lib/bir_extract/geometry.py)) —
   deterministic from the Revit element id. That's the handle Blender uses to find
   and replace exactly the objects that changed.
 - **The apply-loop + transport already exist.** [live.py](../blender/interactive/live.py)

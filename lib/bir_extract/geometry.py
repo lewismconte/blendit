@@ -6,8 +6,8 @@ stable `node` key that the SceneSpec `elements` list maps back to Revit metadata
 No normals are emitted -> Blender's glTF import computes flat face normals, which
 is what you want for crisp hard-surface architecture.
 """
-from contract.transport import MeshData
-from extract import _compat
+from bir_contract.transport import MeshData
+from bir_extract import _compat
 
 DB = _compat.DB
 _DEFAULT_MAT = "mat_default"

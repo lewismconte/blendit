@@ -5,7 +5,7 @@ Smoothness), which always exist, so every material renders as *something* sane.
 Richer appearance-asset reading (metallic detection, glossiness, textures, the
 Appendix D `appearance_class`) is the next material iteration -> contract 0.2.0.
 """
-from extract import _compat
+from bir_extract import _compat
 
 DB = _compat.DB
 

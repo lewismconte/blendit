@@ -9,8 +9,8 @@ import os
 import bir_bootstrap
 bir_bootstrap.ensure_paths()
 
-from contract.transport import get_exporter, SCENE_SPEC_FILENAME
-import transports.gltf.exporter  # noqa: F401  registers the "gltf" exporter
+from bir_contract.transport import get_exporter, SCENE_SPEC_FILENAME
+import bir_transports.gltf.exporter  # noqa: F401  registers the "gltf" exporter
 
 _BLEND_NAME = "scene.blend"
 
@@ -28,7 +28,7 @@ def extract_or_demo(doc, cfg, report, progress=None):
         report("- no active Revit document -> using demo box")
     else:
         try:
-            from extract import revit_extract
+            from bir_extract import revit_extract
             view = revit_extract.active_3d_view(doc)
             if view is None:
                 report("- active view isn't a 3D view -> using demo box "
@@ -44,7 +44,7 @@ def extract_or_demo(doc, cfg, report, progress=None):
                 report("- no geometry extracted -> using demo box")
         except Exception as ex:
             report("- extraction error (%s) -> using demo box" % ex)
-    from extract import demo
+    from bir_extract import demo
     spec, meshes = demo.build_demo_bundle()
     spec.setdefault("render", {}).update(overrides)
     return spec, meshes

@@ -10,8 +10,8 @@
 
 | Claim (live-sync.md) | Reality in the code | Consequence |
 |---|---|---|
-| Extraction is per-element | ✓ `extract_geometry` loops elements, tessellates each ([geometry.py:38](../lib/extract/geometry.py)) | Refactor: factor the loop **body** into `extract_element(doc, elem, opt)`; the full extract and a delta both call it. |
-| Node id is the join | ✓ but **element ≠ node** | A multi-material element emits **N** nodes `<cat>_<id>_<n>` ([geometry.py:64-72](../lib/extract/geometry.py)). The delta **unit is the element** (its whole node-set); a material edit changes the node *count*. |
+| Extraction is per-element | ✓ `extract_geometry` loops elements, tessellates each ([geometry.py:38](../lib/bir_extract/geometry.py)) | Refactor: factor the loop **body** into `extract_element(doc, elem, opt)`; the full extract and a delta both call it. |
+| Node id is the join | ✓ but **element ≠ node** | A multi-material element emits **N** nodes `<cat>_<id>_<n>` ([geometry.py:64-72](../lib/bir_extract/geometry.py)). The delta **unit is the element** (its whole node-set); a material edit changes the node *count*. |
 | Blender finds objects by node id | ✓ **reliable** (spike-confirmed) | Imported object names == spec element nodes **exactly** (`Box_1`, `Glass_1`); node names are unique by construction (category-no-spaces + numeric id [+ `_n`]). Belt-and-suspenders: stamp `obj["node"]` at import. |
 | Apply-loop + transport reusable | ✓ transport; ⚠️ **apply must NOT reuse the glTF importer** | [merge.py](../blender/pipeline/merge.py) proves `bpy.ops.object.join` **silently fails in the session's timer context** (the "white mode" bug) — which is why merge uses bmesh. The glTF importer uses `bpy.ops.import_scene.gltf`; **do not assume it's timer-safe.** |
 | Persistent session on timers | ✓ `bpy.app.timers.register(_deferred_setup, ...)` ([live.py](../blender/interactive/live.py)) | The watcher is one more timer, same pattern. |
@@ -72,10 +72,10 @@
 ## 4. Phase A — file-by-file (Revit→Blender geometry deltas + Sync UI)
 
 **Revit (IronPython 2.7, pure-ASCII chain):**
-- `lib/extract/geometry.py` — factor out `extract_element(doc, elem, opt)`; `extract_geometry` calls it in its loop (no behaviour change; unit-testable shape).
-- `lib/extract/delta.py` *(new)* — `build_patch(doc, view3d, dirty_ids) -> (meshdata_list, removed_nodes)`: builds `opt`, re-checks visibility, maps each dirty element id → its nodes, re-extracts present ones, lists removed.
+- `lib/bir_extract/geometry.py` — factor out `extract_element(doc, elem, opt)`; `extract_geometry` calls it in its loop (no behaviour change; unit-testable shape).
+- `lib/bir_extract/delta.py` *(new)* — `build_patch(doc, view3d, dirty_ids) -> (meshdata_list, removed_nodes)`: builds `opt`, re-checks visibility, maps each dirty element id → its nodes, re-extracts present ones, lists removed.
 - `lib/sync.py` *(new)* — the engine: `DocumentChanged` handler (accumulate dirty ids, no heavy work), `Idling` handler (flush → `build_patch` → `transport.write_patch`), idempotent `subscribe()/unsubscribe()`, `Live/Trigger/Off` state + heartbeat singleton.
-- `contract/transport.py` — `write_patch(spool, seq, meshes, removed, camera=None)` / `read_patch(path)` / `patch_dir_of(bundle_ref)` (IPy-safe; raw-mesh JSON).
+- `bir_contract/transport.py` — `write_patch(spool, seq, meshes, removed, camera=None)` / `read_patch(path)` / `patch_dir_of(bundle_ref)` (IPy-safe; raw-mesh JSON).
 - `Blendit.tab/Render.panel/Sync.pulldown` *(new)* — **Live Sync / Trigger Sync / Sync Off** (+ **Sync Now** for Trigger). Off is default.
 
 **Blender (CPython):**

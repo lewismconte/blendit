@@ -23,8 +23,8 @@ for p in (_ROOT, _REVIT_LIB):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from contract.transport import MeshData, get_exporter
-import transports.gltf.exporter  # noqa: F401  registers the exporter
+from bir_contract.transport import MeshData, get_exporter
+import bir_transports.gltf.exporter  # noqa: F401  registers the exporter
 
 
 def _box(node, mid):

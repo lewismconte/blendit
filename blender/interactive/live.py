@@ -163,9 +163,9 @@ def _run_busy(label, fn):
 
 def _export_path(subdir, prefix, ext):
     """<output>/<subdir>/<prefix>_<stamp>.<ext> - the SAME dated naming the Revit
-    render uses (via contract.transport.stamped_name), with a counter suffix only if
+    render uses (via bir_contract.transport.stamped_name), with a counter suffix only if
     a file already exists in the same second."""
-    from contract.transport import stamped_name
+    from bir_contract.transport import stamped_name
     base = _CAPTURE_DIR or os.path.expanduser("~")
     d = os.path.join(base, subdir)
     if not os.path.isdir(d):
@@ -1854,7 +1854,7 @@ def _deferred_build():
     if ns.mode:
         overrides["mode"] = ns.mode
 
-    from contract.transport import bundle_dir_of
+    from bir_contract.transport import bundle_dir_of
     from blender.pipeline.run import import_scene, prepare_scene, _apply_overrides
     from blender.pipeline import cache as bir_cache
 
