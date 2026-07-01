@@ -430,7 +430,8 @@ def _update_hatch(self, context):
     if _SYNCING or _LOADED is None:
         return
     from blender.pipeline import npr
-    npr.set_hatch(_LOADED, self.hatch_density, self.hatch_cross, self.hatch_weight)
+    npr.set_hatch(_LOADED, self.hatch_density, self.hatch_cross, self.hatch_weight,
+                  self.hatch_angle, self.hatch_cross_angle)
 
 
 def _update_depth_cue(self, context):
@@ -749,8 +750,16 @@ class BIR_Settings(bpy.types.PropertyGroup):
         update=_update_hatch)
     hatch_cross: bpy.props.BoolProperty(
         name="Cross-hatch", default=False,
-        description="Add the perpendicular pass (concentric latitude lines) in the "
-                    "darker tones", update=_update_hatch)
+        description="Add a second, crossing set of lines in the darker tones "
+                    "(its direction is the Cross Angle below)", update=_update_hatch)
+    hatch_angle: bpy.props.FloatProperty(
+        name="Hatch Angle", default=0.0, min=0.0, max=360.0,
+        description="Rotate the hatch line direction, 0-360 deg (within each surface "
+                    "plane)", update=_update_hatch)
+    hatch_cross_angle: bpy.props.FloatProperty(
+        name="Cross Angle", default=90.0, min=0.0, max=360.0,
+        description="Direction of the cross-hatch set, 0-360 deg (90 = perpendicular "
+                    "to the hatch)", update=_update_hatch)
     depth_cue: bpy.props.BoolProperty(
         name="Depth Cue", default=False,
         description="Tier line weight by distance: near edges thick + dark, far "
@@ -1193,7 +1202,10 @@ class BIR_PT_lines(_Sub, bpy.types.Panel):
             hb = layout.column(align=True)
             hb.prop(st, "hatch_density", slider=True)
             hb.prop(st, "hatch_weight", slider=True)
+            hb.prop(st, "hatch_angle", slider=True)
             hb.prop(st, "hatch_cross", toggle=True)
+            if st.hatch_cross:
+                hb.prop(st, "hatch_cross_angle", slider=True)
         big = layout.column(align=True)
         big.scale_y = 1.3
         big.operator("bir.regenerate_lines", icon="FILE_REFRESH")

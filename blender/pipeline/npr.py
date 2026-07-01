@@ -489,7 +489,9 @@ _HATCH_BANDS = [(0.0, 1.0), (0.16, 0.55), (0.36, 0.32), (0.56, 0.15), (0.76, 0.0
 
 
 def make_hatch_material(name="BIR_Hatch", density=10.0, cross=False,
-                        bands=None, ao_distance=0.0, weight=1.0, cross_dark=0.45):
+                        bands=None, ao_distance=0.0, weight=1.0, cross_dark=0.45,
+                        angle=0.0, cross_angle=90.0):
+    import math
     bands = bands or _HATCH_BANDS
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
@@ -593,20 +595,40 @@ def make_hatch_material(name="BIR_Hatch", density=10.0, cross=False,
                      None, (180, y)),
                   w, (320, y))
 
-    def _triplanar(cx, cy, cz, w, y0):
-        a = _m("MULTIPLY", _stripe(cx, w, y0), wxn, (480, y0))
-        b = _m("MULTIPLY", _stripe(cy, w, y0 - 80), wyn, (480, y0 - 80))
-        c = _m("MULTIPLY", _stripe(cz, w, y0 - 160), wzn, (480, y0 - 160))
+    # ROTATE the stripe direction WITHIN each surface plane: the stripe coordinate is
+    # a unit combination of that plane's two in-plane axes, u*cos + v*sin. cos/sin are
+    # baked in at build time (the angle slider rebuilds the material), and since
+    # (cos,sin) is a unit vector the line spacing (density) stays the same at any
+    # angle. angle 0 = the original "vertical" set; the cross set has its own angle
+    # (default +90 = perpendicular, but any crosshatch angle is allowed).
+    def _rot(u, v, c, s, y):
+        if abs(s) < 1e-6:
+            return u                                   # 0 / 180 deg -> in-plane axis u
+        if abs(c) < 1e-6:
+            return v                                   # 90 / 270 deg -> axis v
+        return _m("ADD", _m("MULTIPLY", u, c, (-60, y)),
+                  _m("MULTIPLY", v, s, (-60, y - 40)), (100, y))
+
+    # (u, v) in-plane axes per normal plane: X-face = YZ, Y-face = XZ, Z-face = XY.
+    _planes = ((py, pz), (px, pz), (px, py))
+
+    def _triplanar(cos_a, sin_a, w, y0):
+        sx = _rot(_planes[0][0], _planes[0][1], cos_a, sin_a, y0)
+        sy = _rot(_planes[1][0], _planes[1][1], cos_a, sin_a, y0 - 80)
+        sz = _rot(_planes[2][0], _planes[2][1], cos_a, sin_a, y0 - 160)
+        a = _m("MULTIPLY", _stripe(sx, w, y0), wxn, (480, y0))
+        b = _m("MULTIPLY", _stripe(sy, w, y0 - 80), wyn, (480, y0 - 80))
+        c = _m("MULTIPLY", _stripe(sz, w, y0 - 160), wzn, (480, y0 - 160))
         return _m("ADD", _m("ADD", a, b, (640, y0 - 40)), c, (780, y0 - 80))
 
-    # primary lines run "vertically" in each plane (spaced along the in-plane
-    # horizontal coord): X-faces use Y, Y-faces use X, Z-faces (ground) use X.
-    primary = _triplanar(py, px, px, width, 760)
+    ch, sh = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+    primary = _triplanar(ch, sh, width, 760)
     cover = primary
     if cross:
+        cc, sc = math.cos(math.radians(cross_angle)), math.sin(math.radians(cross_angle))
         cgate = _m("LESS_THAN", tone, cross_dark, (40, 200))   # 1 in the shadows
         cwidth = _m("MULTIPLY", width, cgate, (220, 220))
-        crossm = _triplanar(pz, pz, py, cwidth, 260)           # perpendicular set
+        crossm = _triplanar(cc, sc, cwidth, 260)               # rotated cross set
         cover = _m("MAXIMUM", primary, crossm, (940, 500))
 
     inv = nt.nodes.new("ShaderNodeMath")         # ink value = 1 - coverage
@@ -622,11 +644,13 @@ def make_hatch_material(name="BIR_Hatch", density=10.0, cross=False,
     return mat
 
 
-def apply_hatch(loaded, density=10.0, cross=False, weight=1.0):
+def apply_hatch(loaded, density=10.0, cross=False, weight=1.0,
+                angle=0.0, cross_angle=90.0):
     """Assign ONE shared shadow-hatch material to every mesh (and the ground, so cast
     shadows hatch). The material reads each surface's own shading, so one instance
     drives the whole scene. Returns the material."""
-    mat = make_hatch_material(density=density, cross=cross, weight=weight)
+    mat = make_hatch_material(density=density, cross=cross, weight=weight,
+                              angle=angle, cross_angle=cross_angle)
     for node, obj in loaded.node_to_object.items():
         if getattr(obj, "type", None) == "MESH":
             obj.data.materials.clear()
@@ -638,10 +662,11 @@ def apply_hatch(loaded, density=10.0, cross=False, weight=1.0):
     return mat
 
 
-def set_hatch(loaded, density, cross, weight=1.0):
+def set_hatch(loaded, density, cross, weight=1.0, angle=0.0, cross_angle=90.0):
     """Live update: rebuild + reassign the hatch material with new params."""
     apply_hatch(loaded, density=float(density), cross=bool(cross),
-                weight=float(weight))
+                weight=float(weight), angle=float(angle),
+                cross_angle=float(cross_angle))
 
 
 # --- depth-cued line weight (tiered, survives vector export) ----------------
