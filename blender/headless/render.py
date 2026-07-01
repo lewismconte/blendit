@@ -32,13 +32,17 @@ def _parse_args():
                    choices=["realistic", "white", "shadow", "linework", "specular",
                             "pen", "sketch", "cel", "hatch"])
     p.add_argument("--samples", type=int)
+    p.add_argument("--resolution", nargs=2, type=int, metavar=("W", "H"),
+                   help="override the output resolution")
+    p.add_argument("--denoise", choices=["on", "off"],
+                   help="override the denoise toggle")
     p.add_argument("--camera", choices=["perspective", "orthographic"],
                    help="override the view's camera type")
     p.add_argument("--two-point", dest="two_point", choices=["on", "off"],
                    help="keep verticals vertical (level the camera); off by default")
     p.add_argument("--vector", choices=["svg", "pdf"],
                    help="export the line work as scalable SVG / PDF instead of a "
-                        "raster (needs a line mode: linework/pen/sketch/cel)")
+                        "raster (needs a line mode: linework/pen/sketch/cel/hatch)")
     p.add_argument("--open", action="store_true",
                    help="open the result when done (so the launcher needn't wait)")
     return p.parse_args(args)
@@ -60,6 +64,10 @@ def main():
         overrides["mode"] = ns.mode
     if ns.samples:
         overrides["samples"] = ns.samples
+    if ns.resolution:
+        overrides["resolution"] = list(ns.resolution)
+    if ns.denoise:
+        overrides["denoise"] = (ns.denoise == "on")
     if ns.camera:
         overrides["camera_type"] = ns.camera
     if ns.two_point:
@@ -75,7 +83,7 @@ def main():
         mode = ns.mode or "linework"
         if mode not in _LINE_MODES:
             sys.stderr.write("--vector needs a line mode "
-                             "(linework/pen/sketch/cel); got --mode %s\n" % mode)
+                             "(linework/pen/sketch/cel/hatch); got --mode %s\n" % mode)
             sys.exit(2)
         overrides["mode"] = mode
         vec_out = os.path.splitext(out_path)[0] + "." + ns.vector

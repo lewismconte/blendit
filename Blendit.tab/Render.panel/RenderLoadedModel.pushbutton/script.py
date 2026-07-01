@@ -52,8 +52,16 @@ def main():
     render_py = bir_bootstrap.render_script_path()
     # --open: Blender opens the PNG itself when done, so Revit isn't blocked waiting
     # on the (possibly minutes-long) render.
+    # The cached bundle is a pure geometry cache: the CURRENT config rides along as
+    # CLI overrides, so Mode / Quality / Resolution / Engine changes made after
+    # Load Model take effect without a re-Load.
     cmd = [blender, "--background", "--python", render_py, "--",
-           "--bundle", bundle_ref, "--out", png, "--open"]
+           "--bundle", bundle_ref, "--out", png, "--open",
+           "--mode", str(cfg.get("mode") or "realistic"),
+           "--engine", str(cfg.get("engine") or "EEVEE"),
+           "--samples", str(cfg.get("samples") or 64),
+           "--resolution", str(res[0]), str(res[1]),
+           "--denoise", "on" if cfg.get("denoise") else "off"]
 
     try:
         logf = open(log_path, "wb")

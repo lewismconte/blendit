@@ -43,7 +43,7 @@ blender.exe --background --python blender/headless/render.py -- ^
     [--engine CYCLES|EEVEE] [--mode MODE] [--samples N] [--camera persp|ortho]
 ```
 
-`MODE`: realistic, white, shadow, specular, linework, pen, sketch, cel.
+`MODE`: realistic, white, shadow, specular, linework, pen, sketch, cel, hatch.
 
 `render.py` parses argv **after `--`**, resolves paths to absolute (Blender
 relativizes `render.filepath` against its own base, not the CWD), picks the

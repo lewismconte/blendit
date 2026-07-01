@@ -1,8 +1,9 @@
 """Export the Line Art as true vector SVG / PDF (scalable line drawings).
 
-Only the NPR line modes (linework / pen / sketch / cel) build a Grease Pencil
-Line Art object (npr.setup_line_art -> 'BIR_LineArt'); the lit modes are shaded
-raster with no vector equivalent, so export raises there with a clear message. The
+Only the NPR line modes (linework / pen / sketch / cel / hatch) build a Grease
+Pencil Line Art object (npr.setup_line_art -> 'BIR_LineArt'); the lit modes are
+shaded raster with no vector equivalent, so export raises there with a clear
+message. The
 Grease Pencil exporter projects the GP through the scene camera at the render
 resolution, so the page matches the composed frame.
 
@@ -109,7 +110,7 @@ def export_vector(out_path, fmt="svg", use_fill=True):
         raise RuntimeError("Unknown vector format %r (use svg or pdf)." % fmt)
     if not has_line_art():
         raise RuntimeError("No line work to export - switch to a line mode "
-                           "(Linework / Pen / Sketch / Cel) first.")
+                           "(Linework / Pen / Sketch / Cel / Hatch) first.")
     if bpy.context.scene.camera is None:
         raise RuntimeError("No camera to project the drawing through.")
 

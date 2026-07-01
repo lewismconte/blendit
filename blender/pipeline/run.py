@@ -102,6 +102,8 @@ def _apply_overrides(spec, overrides):
         r["samples"] = int(overrides["samples"])
     if overrides.get("resolution"):
         r["resolution"] = list(overrides["resolution"])
+    if overrides.get("denoise") is not None:
+        r["denoise"] = bool(overrides["denoise"])
     if overrides.get("camera_type"):
         spec.setdefault("camera", {})["type"] = str(overrides["camera_type"])
     if overrides.get("two_point") is not None:

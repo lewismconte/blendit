@@ -1,22 +1,28 @@
 """Contract single-source-of-truth checks (PLAIN CPYTHON -- no Revit, no bpy).
 
-Locks two things so they can't silently drift:
-  * the JSON schema's render.mode enum == the canonical RENDER_MODES tuple, and
-  * CONTRACT_VERSION has exactly one owner (transport.py), re-exported by scene_spec.
+Locks four things so they can't silently drift:
+  * the JSON schema's render.mode enum == the canonical RENDER_MODES tuple,
+  * CONTRACT_VERSION has exactly one owner (transport.py), re-exported by scene_spec,
+  * the Revit-side mode catalog (bir_config.MODES + labels) covers every mode, and
+  * the ribbon's Mode pulldown has a button per mode.
 
 Run standalone:   python tests/test_contract.py
 Or under pytest:  pytest tests/test_contract.py
 """
 import json
 import os
+import re
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
+_LIB = os.path.join(_ROOT, "lib")
+for _p in (_ROOT, _LIB):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from bir_contract import scene_spec, transport
+import bir_config
 
 
 def _schema_modes():
@@ -43,9 +49,40 @@ def test_contract_version_single_source():
     assert scene_spec.CONTRACT_VERSION == transport.CONTRACT_VERSION
 
 
+def test_revit_config_modes_match_render_modes():
+    # The Revit ribbon / Settings offer bir_config.MODES; a mode missing there is
+    # a shipped feature users can't reach (how "hatch" went missing once).
+    assert set(bir_config.MODES) == set(scene_spec.RENDER_MODES), (
+        "bir_config.MODES %s != RENDER_MODES %s"
+        % (sorted(bir_config.MODES), sorted(scene_spec.RENDER_MODES)))
+    assert set(bir_config.MODE_LABELS) == set(bir_config.MODES), (
+        "MODE_LABELS keys %s != MODES %s"
+        % (sorted(bir_config.MODE_LABELS), sorted(bir_config.MODES)))
+
+
+def test_ribbon_has_a_button_per_mode():
+    # Every render mode gets a pushbutton in the Mode pulldown (each script calls
+    # bir_ui.set_mode("<key>")), so the ribbon can't silently miss a mode.
+    pulldown = os.path.join(_ROOT, "Blendit.tab", "Render.panel", "Mode.pulldown")
+    keys = set()
+    for name in os.listdir(pulldown):
+        script = os.path.join(pulldown, name, "script.py")
+        if not os.path.isfile(script):
+            continue
+        with open(script) as f:
+            m = re.search(r'set_mode\("([a-z]+)"\)', f.read())
+        if m:
+            keys.add(m.group(1))
+    assert keys == set(scene_spec.RENDER_MODES), (
+        "Mode pulldown buttons %s != RENDER_MODES %s"
+        % (sorted(keys), sorted(scene_spec.RENDER_MODES)))
+
+
 if __name__ == "__main__":
     test_schema_modes_match_render_modes()
     test_contract_version_single_source()
+    test_revit_config_modes_match_render_modes()
+    test_ribbon_has_a_button_per_mode()
     print("modes:", sorted(scene_spec.RENDER_MODES))
     print("contract_version:", scene_spec.CONTRACT_VERSION,
           "(==", transport.CONTRACT_VERSION + ")")

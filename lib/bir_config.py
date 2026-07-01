@@ -10,7 +10,7 @@ import os
 _DEFAULTS = {
     "blender_exe": "",          # empty -> auto-detect via bir_bootstrap
     "output_dir": "",           # empty -> bir_bootstrap.default_output_dir()
-    # realistic | white | shadow | specular | linework | pen | sketch | cel
+    # realistic | white | shadow | specular | linework | pen | sketch | cel | hatch
     "mode": "realistic",
     "engine": "EEVEE",          # EEVEE | CYCLES
     "samples": 64,
@@ -19,12 +19,14 @@ _DEFAULTS = {
 }
 
 # Shared catalogs so the ribbon buttons and Settings present the same choices.
+# Must list every contract render mode: tests/test_contract.py locks this against
+# scene_spec.RENDER_MODES so the Revit UI can't silently miss a mode again.
 MODES = ["realistic", "white", "shadow", "specular",
-         "linework", "pen", "sketch", "cel"]
+         "linework", "pen", "sketch", "cel", "hatch"]
 MODE_LABELS = {
     "realistic": "Realistic", "white": "White / Clay", "shadow": "Shadow study",
     "specular": "Specular", "linework": "Linework", "pen": "Pen",
-    "sketch": "Sketch", "cel": "Cel / Anime",
+    "sketch": "Sketch", "cel": "Cel / Anime", "hatch": "Hatch",
 }
 RESOLUTIONS = [("720p", [1280, 720]), ("1080p", [1920, 1080]),
                ("1440p", [2560, 1440]), ("4K", [3840, 2160])]

@@ -83,7 +83,7 @@ def _parse_args():
     p.add_argument("--engine", choices=["CYCLES", "EEVEE"])
     p.add_argument("--mode",
                    choices=["realistic", "white", "shadow", "specular",
-                            "linework", "pen", "sketch", "cel"])
+                            "linework", "pen", "sketch", "cel", "hatch"])
     return p.parse_args(args)
 
 
@@ -1033,7 +1033,8 @@ def _do_export_vector(fmt):
     global _STATUS
     from blender.pipeline import vector_export
     if not vector_export.has_line_art():
-        _STATUS = "Vector export needs a line mode (Linework / Pen / Sketch / Cel)."
+        _STATUS = ("Vector export needs a line mode "
+                   "(Linework / Pen / Sketch / Cel / Hatch).")
         return
     _snap_camera_to_view()
     _enter_frame()                       # WYSIWYG: the export frame == what you see
