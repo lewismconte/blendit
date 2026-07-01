@@ -158,12 +158,18 @@ def ensure_3d_view(doc, report=None):
 
 
 def set_mode(key):
-    """Set the render mode in config and confirm (shared by the Mode buttons)."""
+    """Set the render mode in config and confirm (shared by the Mode buttons).
+    Reports honestly when the config file couldn't be written."""
     import bir_config
-    bir_config.set_value("mode", key)
+    ok = bir_config.set_value("mode", key)
     label = bir_config.MODE_LABELS.get(key, key)
+    if ok:
+        msg = "Render mode set to: %s" % label
+    else:
+        msg = ("Couldn't save the render mode (is the config file locked or "
+               "read-only?). Nothing was changed.")
     try:
         from pyrevit import forms
-        forms.alert("Render mode set to: %s" % label, title="Blendit")
+        forms.alert(msg, title="Blendit")
     except Exception:
-        print("mode: %s" % key)
+        print(msg)

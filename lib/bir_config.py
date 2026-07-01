@@ -74,14 +74,18 @@ def load():
 
 
 def save(cfg):
+    """Write the config. Returns True on success, False when the file couldn't
+    be written (locked / read-only) so callers can tell the user instead of
+    silently confirming a change that never persisted."""
     try:
         f = open(_config_path(), "w")
         try:
             json.dump(cfg, f, indent=2)
         finally:
             f.close()
+        return True
     except Exception:
-        pass
+        return False
 
 
 def get_value(key, default=None):
@@ -92,7 +96,7 @@ def get_value(key, default=None):
 
 
 def set_value(key, value):
+    """Set one key and persist. Returns save()'s success flag."""
     cfg = load()
     cfg[key] = value
-    save(cfg)
-    return cfg
+    return save(cfg)

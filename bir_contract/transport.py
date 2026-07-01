@@ -135,9 +135,16 @@ class LoadedScene(object):
 def check_contract_version(spec_dict):
     # (dict) -> None ; refuse on MAJOR mismatch, warn on MINOR
     got = str(spec_dict.get("contract_version", "0.0.0"))
-    if got.split(".")[0] != CONTRACT_VERSION.split(".")[0]:
+    got_parts = got.split(".")
+    code_parts = CONTRACT_VERSION.split(".")
+    if got_parts[0] != code_parts[0]:
         raise ValueError("Incompatible contract major version: bundle=%s code=%s"
                          % (got, CONTRACT_VERSION))
+    got_minor = got_parts[1] if len(got_parts) > 1 else "0"
+    if got_minor != code_parts[1]:
+        print("Blendit: contract minor version differs (bundle=%s, code=%s) - "
+              "newer optional fields may be missing or ignored."
+              % (got, CONTRACT_VERSION))
 
 
 # --- registry: select transport by name (== SceneSpec.geometry.transport) ---

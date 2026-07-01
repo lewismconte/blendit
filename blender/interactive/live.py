@@ -454,6 +454,15 @@ def _update_engine(self, context):
     _SPEC.setdefault("render", {})["engine"] = self.engine
     from blender.pipeline.engine import setup_engine
     setup_engine(_SPEC)
+    # Rebuild the materials for the new engine when they're visible: EEVEE glass
+    # needs per-material raytraced-refraction flags that only
+    # build_material(engine="EEVEE") sets, so a CYCLES-built scene switched to
+    # EEVEE would otherwise render its glass opaque.
+    if self.mode in _TEXTURED_MODES and _LOADED is not None:
+        from blender.pipeline.materials import apply_materials
+        apply_materials(_LOADED, engine=self.engine)
+        if self.mode == "specular":     # re-assert the gloss slider on the rebuild
+            _helpers().set_glossiness(_LOADED, 1.0 - self.gloss)
     # If clouds are in the scene, re-apply their volume step / sample settings for the
     # engine we just switched to (Cycles wants step-rate; EEVEE wants sample counts).
     from blender.interactive import clouds
@@ -902,23 +911,27 @@ def _init_materials():
 
 
 # --- operators --------------------------------------------------------------
+def _do_capture():
+    global _STATUS
+    _snap_camera_to_view()
+    out = _next_capture_path()
+    sc = bpy.context.scene
+    sc.render.image_settings.file_format = "PNG"
+    sc.render.filepath = out
+    bpy.ops.render.render(write_still=True)
+    _enter_frame()                 # show exactly what was captured (navigable)
+    _STATUS = "Saved: %s" % os.path.basename(out)
+
+
 class BIR_OT_render_image(bpy.types.Operator):
     bl_idname = "bir.render_image"
     bl_label = "Capture"
     bl_description = "Snap the camera to your current view and render a PNG"
 
     def execute(self, context):
-        global _STATUS
-        _snap_camera_to_view()
-        out = _next_capture_path()
-        sc = context.scene
-        sc.render.image_settings.file_format = "PNG"
-        sc.render.filepath = out
-        _STATUS = "Rendering..."
-        bpy.ops.render.render(write_still=True)
-        _enter_frame()             # show exactly what was captured (navigable)
-        _STATUS = "Saved: %s" % os.path.basename(out)
-        self.report({"INFO"}, "Saved: %s" % out)
+        # Deferred via _run_busy so the WORKING banner paints before the
+        # (blocking) render - same treatment as Render Final / Regenerate.
+        _run_busy("Rendering capture", _do_capture)
         return {"FINISHED"}
 
 
@@ -980,6 +993,11 @@ def _do_render_final():
     samples = int(st.final_samples) if st is not None else 200
     npr_mode = bool(st is not None and st.mode in _LINE_MODES)
     prev_engine = sc.render.engine
+    try:                                    # final samples are final-only: remember
+        prev_eevee_samples = sc.eevee.taa_render_samples
+        prev_cycles_samples = sc.cycles.samples
+    except Exception:
+        prev_eevee_samples = prev_cycles_samples = None
     from blender.pipeline.engine import _eevee_engine_id
     if npr_mode:
         sc.render.engine = _eevee_engine_id()
@@ -993,6 +1011,13 @@ def _do_render_final():
     sc.render.filepath = out
     bpy.ops.render.render(write_still=True)
     sc.render.engine = prev_engine          # restore the fast viewport engine
+    try:                                    # ...and the configured sample counts
+        if prev_eevee_samples is not None:
+            sc.eevee.taa_render_samples = prev_eevee_samples
+        if prev_cycles_samples is not None:
+            sc.cycles.samples = prev_cycles_samples
+    except Exception:
+        pass
     global _STATUS
     _STATUS = "Final saved: %s" % os.path.basename(out)
     try:
@@ -1505,6 +1530,7 @@ def _enter_fly():
             if r3d is not None and r3d.view_perspective == "CAMERA":
                 r3d.view_perspective = "PERSP"
         area.tag_redraw()
+    _set_keymap_fly(True)
     _sync_view_toggles()
 
 
@@ -1527,6 +1553,7 @@ def _enter_build():
                 pass
             space.lock_camera = False
         area.tag_redraw()
+    _set_keymap_fly(False)
     _sync_view_toggles()
 
 
@@ -1618,6 +1645,9 @@ def _frame_free_view():
 
 
 # --- keymap -----------------------------------------------------------------
+_KEYMAP_ITEMS = []   # (keymap_item, fly_only)
+
+
 def _bind_keymap():
     global _KEYMAP_BOUND
     if _KEYMAP_BOUND:
@@ -1628,12 +1658,27 @@ def _bind_keymap():
             return
         km = kc.keymaps.new(name="3D View", space_type="VIEW_3D")
         for key in ("RET", "NUMPAD_ENTER"):
-            km.keymap_items.new("bir.render_image", key, "PRESS")
-        km.keymap_items.new("bir.toggle_mode", "F10", "PRESS")
-        km.keymap_items.new("bir.regenerate_lines", "L", "PRESS")
+            _KEYMAP_ITEMS.append(
+                (km.keymap_items.new("bir.render_image", key, "PRESS"), True))
+        _KEYMAP_ITEMS.append(
+            (km.keymap_items.new("bir.toggle_mode", "F10", "PRESS"), False))
+        _KEYMAP_ITEMS.append(
+            (km.keymap_items.new("bir.regenerate_lines", "L", "PRESS"), True))
         _KEYMAP_BOUND = True
     except Exception:
         pass
+
+
+def _set_keymap_fly(fly):
+    """Fly-only shortcuts (Enter = capture, L = regen) shadow Blender's own keys
+    (select-linked etc.), so they are active only in Fly mode. F10 stays live in
+    both modes - it is the way back."""
+    for kmi, fly_only in _KEYMAP_ITEMS:
+        if fly_only:
+            try:
+                kmi.active = bool(fly)
+            except Exception:
+                pass
 
 
 # --- on-screen overlay (HUD) -----------------------------------------------

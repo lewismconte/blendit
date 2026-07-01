@@ -26,11 +26,14 @@ def main():
     preset = bir_config.QUALITY[choice]
     cfg = bir_config.load()
     cfg.update(preset)
-    bir_config.save(cfg)
-    forms.alert("Quality: %s\n\nEngine: %s\nSamples: %s\nDenoise: %s"
-                % (choice, preset["engine"], preset["samples"],
-                   "on" if preset["denoise"] else "off"),
-                title="Blendit - Quality")
+    if bir_config.save(cfg):
+        forms.alert("Quality: %s\n\nEngine: %s\nSamples: %s\nDenoise: %s"
+                    % (choice, preset["engine"], preset["samples"],
+                       "on" if preset["denoise"] else "off"),
+                    title="Blendit - Quality")
+    else:
+        forms.alert("Couldn't save the quality preset (is the config file "
+                    "locked?). Nothing was changed.", title="Blendit - Quality")
 
 
 main()

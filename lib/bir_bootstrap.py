@@ -106,6 +106,30 @@ def cache_dir_for(key):
     return d
 
 
+def clear_cache():
+    """Delete every cached model extraction + prepared .blend scene. Returns
+    (removed, failed) counts; a slot that can't be deleted (in use by an open
+    Blender session / running render) is skipped and counted as failed."""
+    import shutil
+    root = cache_root()
+    removed, failed = 0, 0
+    try:
+        entries = os.listdir(root)
+    except Exception:
+        return 0, 0
+    for name in entries:
+        p = os.path.join(root, name)
+        try:
+            if os.path.isdir(p):
+                shutil.rmtree(p)
+            else:
+                os.remove(p)
+            removed += 1
+        except Exception:
+            failed += 1
+    return removed, failed
+
+
 def doc_cache_key(doc):
     """A stable, filesystem-safe cache key for a Revit document: a readable name
     prefix + a hash of the full path, so two models never share a cache slot and

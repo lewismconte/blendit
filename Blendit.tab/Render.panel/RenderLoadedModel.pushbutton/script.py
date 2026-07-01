@@ -48,7 +48,9 @@ def main():
         except Exception:
             pass
     png = os.path.join(out_dir, stamped_name("render", "png"))
-    log_path = os.path.join(out_dir, "render.log")
+    # Log shares the PNG's stamp: concurrent renders never fight over one file,
+    # and a failed render's log sits right next to where its image would be.
+    log_path = os.path.splitext(png)[0] + ".log"
     render_py = bir_bootstrap.render_script_path()
     # --open: Blender opens the PNG itself when done, so Revit isn't blocked waiting
     # on the (possibly minutes-long) render.
@@ -65,7 +67,10 @@ def main():
 
     try:
         logf = open(log_path, "wb")
-        subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
+        try:
+            subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
+        finally:
+            logf.close()          # the child holds its own handle; don't leak ours
     except OSError as ex:
         _report("**ERROR** launching Blender: %s\n\n"
                 "Set the Blender path in Settings (or BLENDIT_BLENDER_EXE)." % ex)

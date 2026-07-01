@@ -18,9 +18,13 @@ def main():
         return
     for label, res in bir_config.RESOLUTIONS:
         if label == choice:
-            bir_config.set_value("resolution", res)
-            forms.alert("Resolution: %s  (%sx%s)" % (label, res[0], res[1]),
-                        title="Blendit - Resolution")
+            if bir_config.set_value("resolution", res):
+                forms.alert("Resolution: %s  (%sx%s)" % (label, res[0], res[1]),
+                            title="Blendit - Resolution")
+            else:
+                forms.alert("Couldn't save the resolution (is the config file "
+                            "locked?). Nothing was changed.",
+                            title="Blendit - Resolution")
             break
 
 

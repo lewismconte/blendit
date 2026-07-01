@@ -23,12 +23,20 @@ def _set_resolution(cfg):
         cur = cfg.get("resolution", [1600, 900])
         w = forms.ask_for_string(default=str(cur[0]), prompt="Width (px):",
                                  title="Resolution")
+        if w is None:                       # cancelled - not an input error
+            return
         h = forms.ask_for_string(default=str(cur[1]), prompt="Height (px):",
                                  title="Resolution")
+        if h is None:
+            return
         try:
-            bir_config.set_value("resolution", [int(w), int(h)])
+            res = [int(w), int(h)]
         except Exception:
             forms.alert("Need two whole numbers.", title="Resolution")
+            return
+        if not bir_config.set_value("resolution", res):
+            forms.alert("Couldn't save the resolution (is the config file "
+                        "locked?).", title="Resolution")
         return
     for label, res in bir_config.RESOLUTIONS:
         if label == choice:
@@ -60,6 +68,24 @@ def _set_default_mode(cfg):
             return
 
 
+def _clear_cache():
+    from pyrevit import forms
+    choice = forms.alert(
+        "Delete all cached model extractions and prepared scenes?\n\n"
+        "The next Load Model re-extracts from scratch. Close any open Blendit "
+        "Blender sessions first.",
+        title="Blendit - Clear model cache",
+        options=["Clear cache", "Cancel"])
+    if choice != "Clear cache":
+        return
+    removed, failed = bir_bootstrap.clear_cache()
+    msg = "Removed %d cached model(s)." % removed
+    if failed:
+        msg += ("\n%d couldn't be removed (still in use?) - close Blender and "
+                "try again." % failed)
+    forms.alert(msg, title="Blendit - Clear model cache")
+
+
 def _show_all(cfg):
     from pyrevit import forms
     res = cfg.get("resolution", [1600, 900])
@@ -88,6 +114,7 @@ def main():
             "Engine  (%s)" % cfg.get("engine"),
             "Default mode  (%s)" % bir_config.MODE_LABELS.get(cfg.get("mode"),
                                                               cfg.get("mode")),
+            "Clear model cache",
             "Show all settings",
         ]
         choice = forms.CommandSwitchWindow.show(
@@ -113,6 +140,8 @@ def main():
             bir_config.set_value("engine", new)
         elif choice.startswith("Default mode"):
             _set_default_mode(cfg)
+        elif choice == "Clear model cache":
+            _clear_cache()
         elif choice == "Show all settings":
             _show_all(cfg)
 

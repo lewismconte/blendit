@@ -14,8 +14,12 @@ import bir_config
 def main():
     cur = str(bir_config.get_value("engine", "EEVEE")).upper()
     new = "CYCLES" if cur == "EEVEE" else "EEVEE"
-    bir_config.set_value("engine", new)
-    msg = "Render engine set to: %s\n\nEEVEE = fast / realtime, CYCLES = accurate final." % new
+    if bir_config.set_value("engine", new):
+        msg = ("Render engine set to: %s\n\n"
+               "EEVEE = fast / realtime, CYCLES = accurate final." % new)
+    else:
+        msg = ("Couldn't save the engine setting (is the config file locked?). "
+               "Nothing was changed.")
     try:
         from pyrevit import forms
         forms.alert(msg, title="Blendit - Engine")

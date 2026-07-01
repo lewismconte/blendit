@@ -5,6 +5,10 @@ element, so a multi-material element yields one MeshData per material (each with
 stable `node` key that the SceneSpec `elements` list maps back to Revit metadata).
 No normals are emitted -> Blender's glTF import computes flat face normals, which
 is what you want for crisp hard-surface architecture.
+
+Collected geometry: Solids (tessellated per face), GeometryInstances (recursed),
+and bare DB.Mesh objects (imported CAD / DirectShape content, which never comes
+through as a Solid and would otherwise silently vanish from the render).
 """
 from bir_contract.transport import MeshData
 from bir_extract import _compat
@@ -80,6 +84,9 @@ def _collect(geo, groups):
         if isinstance(obj, DB.Solid):
             if obj.Faces.Size > 0:
                 _collect_solid(obj, groups)
+        elif isinstance(obj, DB.Mesh):
+            # Imported CAD / DirectShape geometry arrives as a bare Mesh.
+            _append_mesh(obj, _mesh_material_key(obj), groups)
         elif isinstance(obj, DB.GeometryInstance):
             try:
                 inst_geo = obj.GetInstanceGeometry()  # already in model coords
@@ -101,16 +108,31 @@ def _collect_solid(solid, groups):
             mesh = None
         if mesh is None:
             continue
-        g = groups.setdefault(mat_key, {"verts": [], "tris": []})
-        base = len(g["verts"])
-        for vi in range(mesh.Vertices.Count):
-            p = mesh.Vertices[vi]
-            g["verts"].append((p.X, p.Y, p.Z))
-        for ti in range(mesh.NumTriangles):
-            tri = mesh.get_Triangle(ti)
-            g["tris"].append((base + int(tri.get_Index(0)),
-                              base + int(tri.get_Index(1)),
-                              base + int(tri.get_Index(2))))
+        _append_mesh(mesh, mat_key, groups)
+
+
+def _append_mesh(mesh, mat_key, groups):
+    """Append a Revit DB.Mesh's triangles into the per-material group."""
+    g = groups.setdefault(mat_key, {"verts": [], "tris": []})
+    base = len(g["verts"])
+    for vi in range(mesh.Vertices.Count):
+        p = mesh.Vertices[vi]
+        g["verts"].append((p.X, p.Y, p.Z))
+    for ti in range(mesh.NumTriangles):
+        tri = mesh.get_Triangle(ti)
+        g["tris"].append((base + int(tri.get_Index(0)),
+                          base + int(tri.get_Index(1)),
+                          base + int(tri.get_Index(2))))
+
+
+def _mesh_material_key(mesh):
+    try:
+        mid = mesh.MaterialElementId
+        if mid is None or mid == DB.ElementId.InvalidElementId:
+            return _DEFAULT_MAT
+        return "mat_%s" % _compat.id_value(mid)
+    except Exception:
+        return _DEFAULT_MAT
 
 
 def _face_material_key(face):
