@@ -24,7 +24,7 @@ It runs on **Blender** (also free), so there's nothing to subscribe to and nothi
 locking your work in.
 
 <p align="center">
-  <img src="docs/images/phase0_realistic.png" width="70%" alt="A Blendit render" />
+  <img src="media/blendit_hero.png" width="80%" alt="A Blendit line render of a building" />
 </p>
 
 ## What you get
