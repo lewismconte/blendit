@@ -453,6 +453,13 @@ def _update_engine(self, context):
     _SPEC.setdefault("render", {})["engine"] = self.engine
     from blender.pipeline.engine import setup_engine
     setup_engine(_SPEC)
+    # If clouds are in the scene, re-apply their volume step / sample settings for the
+    # engine we just switched to (Cycles wants step-rate; EEVEE wants sample counts).
+    from blender.interactive import clouds
+    if clouds.DOMAIN_NAME in bpy.data.objects:
+        cl = getattr(context.scene, "bir_clouds", None)
+        if cl is not None:
+            clouds.apply_render_settings(context, cl.quality)
 
 
 def _apply_sun_direction(az, alt):
@@ -1273,6 +1280,10 @@ class BIR_PT_atmosphere(_Sub, bpy.types.Panel):
         if s is None:
             return
         layout = self.layout
+        st = _bir(context)
+        if st is not None:
+            row = layout.row(align=True)         # same engine prop as View Mode
+            row.prop(st, "engine", expand=True)   # clouds need Cycles to look right
         col = layout.column(align=True)
         col.prop(s, "preset")
         row = col.row(align=True)
@@ -1280,7 +1291,8 @@ class BIR_PT_atmosphere(_Sub, bpy.types.Panel):
         row.operator("bir.clouds_generate", icon="OUTLINER_OB_VOLUME")
         col.prop(s, "live_update")
         layout.operator("bir.clouds_add_sky", icon="LIGHT_SUN")
-        layout.label(text="Clouds render best in Cycles.", icon="INFO")
+        if st is not None and st.engine != "CYCLES":
+            layout.label(text="Switch to Cycles for real clouds.", icon="INFO")
 
 
 class BIR_PT_atmo_shape(_Sub, bpy.types.Panel):
