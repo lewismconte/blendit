@@ -120,6 +120,25 @@ def require_loaded(doc):
     import bir_export
     bundle_ref, blend_path = bir_export.cached_bundle(doc)
     if bundle_ref is not None:
+        # Soft staleness check: warn (never block) when the model looks different
+        # from what Load Model extracted - the "why is my new wall missing?" fix.
+        try:
+            reason = bir_export.staleness(doc)
+        except Exception:
+            reason = None
+        if reason:
+            try:
+                from pyrevit import forms
+                choice = forms.alert(
+                    "The loaded model may be out of date: %s.\n\n"
+                    "Use the cached version anyway, or cancel and press "
+                    "'Load Model' to re-extract first." % reason,
+                    title="Blendit - model changed since Load",
+                    options=["Use cached model", "Cancel"])
+                if choice != "Use cached model":
+                    return None, None
+            except Exception:
+                pass
         return bundle_ref, blend_path
     try:
         from pyrevit import forms
@@ -165,6 +184,7 @@ def set_mode(key):
     label = bir_config.MODE_LABELS.get(key, key)
     if ok:
         msg = "Render mode set to: %s" % label
+        show_mode_preview_once(key)
     else:
         msg = ("Couldn't save the render mode (is the config file locked or "
                "read-only?). Nothing was changed.")
@@ -173,3 +193,34 @@ def set_mode(key):
         forms.alert(msg, title="Blendit")
     except Exception:
         print(msg)
+
+
+def mode_preview_path(key):
+    """Path to the shipped demo-scene preview image for a render mode."""
+    import os
+    import bir_bootstrap
+    return os.path.join(bir_bootstrap.REPO_ROOT, "media", "modes",
+                        "%s.png" % key)
+
+
+def show_mode_preview_once(key):
+    """The FIRST time a mode is picked, show what it looks like (the built-in
+    demo scene) in the output window - visual onboarding without a nag. Seen
+    modes are remembered in the config."""
+    import os
+    import bir_config
+    seen = bir_config.get_value("previewed_modes", []) or []
+    if key in seen:
+        return
+    path = mode_preview_path(key)
+    if not os.path.isfile(path):
+        return
+    try:
+        from pyrevit import script
+        out = script.get_output()
+        out.print_md("**%s** looks like this (built-in demo scene):"
+                     % bir_config.MODE_LABELS.get(key, key))
+        out.print_image(path)
+        bir_config.set_value("previewed_modes", list(seen) + [key])
+    except Exception:
+        pass

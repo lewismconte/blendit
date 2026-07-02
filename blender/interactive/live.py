@@ -1884,15 +1884,16 @@ def main():
     try:
         bpy.app.timers.register(_deferred_build, first_interval=0.1)
     except Exception:
-        _deferred_build()
+        while _deferred_build() is not None:   # no timers: run the stages inline
+            pass
     print("Blendit: live session starting (building scene)...")
 
 
-def _deferred_build():
-    """The heavy scene build, deferred one tick so the 'Building model...' banner
-    paints first. Schedules the Fly-interface setup when the scene is ready."""
-    global _CAPTURE_DIR, _LOADED, _SPEC, _SCALE, _BUSY, _BUSY_LABEL, _STATUS, \
-        _OVERRIDE_DIR
+def _build_steps():
+    """The heavy scene build as a generator: it yields a banner label BEFORE each
+    blocking stage, and the driver (_deferred_build) repaints between yields - so
+    the user watches real stages tick by instead of one frozen 'Building model'."""
+    global _CAPTURE_DIR, _LOADED, _SPEC, _SCALE, _STATUS, _OVERRIDE_DIR
     ns = _BUILD_ARGS
     overrides = {"camera_type": "perspective"}
     if ns.engine:
@@ -1904,52 +1905,85 @@ def _deferred_build():
     from blender.pipeline.run import import_scene, prepare_scene, _apply_overrides
     from blender.pipeline import cache as bir_cache
 
-    try:
-        if ns.blend and os.path.isfile(ns.blend):
-            # FAST PATH: open the cached prepared scene (no re-import).
-            print("Blendit: opening cached scene (%s)" % ns.blend)
-            bir_cache.open_blend(ns.blend)
-            _set_nav_prefs()                 # reassert session prefs after load
-            _LOADED, _SPEC = bir_cache.loaded_from_blend(ns.bundle)
-            _SPEC["_override_dir"] = bundle_dir_of(ns.bundle)  # honour the saved overrides
-            _apply_overrides(_SPEC, overrides)
-            prepare_scene(_LOADED, _SPEC)
-        else:
-            # FRESH IMPORT: bring geometry in, cache the clean scene, then prepare.
-            _LOADED, _SPEC = import_scene(ns.bundle, overrides=overrides or None)
-            if ns.save_blend:
-                try:
-                    bir_cache.save_clean_blend(ns.save_blend)
-                    print("Blendit: cached scene -> %s" % ns.save_blend)
-                except Exception as ex:
-                    print("Blendit: could not cache .blend (%s)" % ex)
-            prepare_scene(_LOADED, _SPEC)
-    except Exception as ex:
-        _STATUS = "Load error: %s (see console)" % ex
-        print("Blendit: scene build FAILED: %s" % ex)
-        import traceback
-        traceback.print_exc()
+    if ns.blend and os.path.isfile(ns.blend):
+        # FAST PATH: open the cached prepared scene (no re-import).
+        yield "Opening cached scene"
+        print("Blendit: opening cached scene (%s)" % ns.blend)
+        bir_cache.open_blend(ns.blend)
+        _set_nav_prefs()                 # reassert session prefs after load
+        _LOADED, _SPEC = bir_cache.loaded_from_blend(ns.bundle)
+        _SPEC["_override_dir"] = bundle_dir_of(ns.bundle)  # honour the saved overrides
+        _apply_overrides(_SPEC, overrides)
+    else:
+        # FRESH IMPORT: bring geometry in, cache the clean scene, then prepare.
+        yield "Importing geometry"
+        _LOADED, _SPEC = import_scene(ns.bundle, overrides=overrides or None)
+        if ns.save_blend:
+            yield "Caching scene for fast reopen"
+            try:
+                bir_cache.save_clean_blend(ns.save_blend)
+                print("Blendit: cached scene -> %s" % ns.save_blend)
+            except Exception as ex:
+                print("Blendit: could not cache .blend (%s)" % ex)
 
+    yield "Applying materials, light & camera"
+    prepare_scene(_LOADED, _SPEC)
+
+    yield "Preparing panels"
     if _SPEC is not None:
         _SCALE = float(_SPEC.get("units", {}).get("scale_to_meters", 1.0))
     _CAPTURE_DIR = ns.capture_dir or bundle_dir_of(ns.bundle)
     _OVERRIDE_DIR = bundle_dir_of(ns.bundle)
     if _SPEC is not None:
         _SPEC["_override_dir"] = _OVERRIDE_DIR
-
     _init_sun()                              # seed + apply the Revit-style sun once
     _init_camera_panel()                     # reflect the built camera into the View panel
     _init_materials()                        # build the Materials list + apply saved overrides
     _register_hud()                          # ensure the HUD survived open_mainfile
+
+
+_BUILD_GEN = None
+
+
+def _finish_build():
+    """Common tail for success AND failure: drop the busy banner and bring up the
+    Fly interface (the panels are registered, so the session stays usable)."""
+    global _BUSY, _BUSY_LABEL
     _BUSY = False
     _BUSY_LABEL = ""
+    _redraw_all()
     try:
         bpy.app.timers.register(_deferred_setup, first_interval=0.1)
     except Exception:
         _deferred_setup()
-    print("Blendit: live session ready (Fly mode). N for the panel, "
-          "Enter to capture, Render Final for a high-quality shot, F10 for full UI.")
-    return None
+
+
+def _deferred_build():
+    """Timer driver for _build_steps: runs ONE stage per tick and repaints the
+    banner with the next stage's name in between, so progress is visible."""
+    global _BUILD_GEN, _BUSY_LABEL, _STATUS
+    if _BUILD_GEN is None:
+        _BUILD_GEN = _build_steps()
+    try:
+        label = next(_BUILD_GEN)
+    except StopIteration:
+        _BUILD_GEN = None
+        _finish_build()
+        print("Blendit: live session ready (Fly mode). N for the panel, "
+              "Enter to capture, Render Final for a high-quality shot, "
+              "F10 for full UI.")
+        return None
+    except Exception as ex:
+        _BUILD_GEN = None
+        _STATUS = "Load error: %s (see console)" % ex
+        print("Blendit: scene build FAILED: %s" % ex)
+        import traceback
+        traceback.print_exc()
+        _finish_build()
+        return None
+    _BUSY_LABEL = label
+    _redraw_all()
+    return 0.05                # let the banner paint, then run the next stage
 
 
 # Blender runs this with --python (so __name__ == "__main__"); tests can import the

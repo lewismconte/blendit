@@ -13,6 +13,7 @@ engine without re-exporting from Revit.
 import argparse
 import os
 import sys
+import time
 
 
 def _repo_root():
@@ -49,6 +50,58 @@ def _parse_args():
 
 
 _LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch")
+
+
+def _fmt_duration(seconds):
+    mins, secs = divmod(int(round(seconds)), 60)
+    return "%dm %02ds" % (mins, secs) if mins else "%ds" % secs
+
+
+def _notify_done(png_path, seconds):
+    """Best-effort Windows toast: the render landed, and how long it took.
+    Purely additive (the PNG still auto-opens with --open); any failure is
+    swallowed - a missing toast must never break a finished render."""
+    try:
+        import subprocess
+        title = "Blendit"
+        body = "Render finished in %s" % _fmt_duration(seconds)
+        img_uri = "file:///" + png_path.replace("\\", "/").replace("'", "''")
+        ps = (
+            "[Windows.UI.Notifications.ToastNotificationManager, "
+            "Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null;"
+            "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, "
+            "ContentType=WindowsRuntime] | Out-Null;"
+            "$x = New-Object Windows.Data.Xml.Dom.XmlDocument;"
+            "$x.LoadXml('<toast><visual><binding template=\"ToastGeneric\">"
+            "<text>" + title + "</text><text>" + body + "</text>"
+            "<image placement=\"hero\" src=\"" + img_uri + "\"/>"
+            "</binding></visual></toast>');"
+            "$t = New-Object Windows.UI.Notifications.ToastNotification $x;"
+            "[Windows.UI.Notifications.ToastNotificationManager]::"
+            "CreateToastNotifier('Blendit').Show($t)"
+        )
+        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                          "-Command", ps])
+    except Exception:
+        pass
+
+
+def _failure_hint(tb):
+    """A plain-English first-aid line for the render_FAILED note, matched from
+    the traceback. Grows as real user failures come in."""
+    low = tb.lower()
+    if "out of memory" in low or "cuda" in low or "optix" in low or "hip" in low:
+        return ("Likely the GPU ran out of memory - lower the Resolution or "
+                "Samples (Quality button) and try again, or switch the "
+                "Engine to EEVEE.")
+    if "scene.glb" in low or "no such file" in low or "filenotfounderror" in low:
+        return ("The cached bundle looks incomplete - press Load Model in "
+                "Revit to re-extract, then render again.")
+    if "permission" in low or "access is denied" in low:
+        return ("Couldn't write the output - check the Output folder in "
+                "Settings is writable (not read-only / cloud-locked).")
+    return ("Press Load Model in Revit and try again; if it keeps failing, "
+            "check the .log file next to where the image should be.")
 
 
 def main():
@@ -99,6 +152,7 @@ def main():
         return
 
     from blender.pipeline.run import run_pipeline
+    started = time.time()
     try:
         out = run_pipeline(bundle, out_path, overrides=overrides or None)
     except Exception:
@@ -113,7 +167,8 @@ def main():
         try:
             f = open(note, "w")
             try:
-                f.write("Blendit render failed.\n\n" + tb)
+                f.write("Blendit render failed.\n\nWHAT TO TRY: "
+                        + _failure_hint(tb) + "\n\nDetails:\n" + tb)
             finally:
                 f.close()
             if ns.open:
@@ -124,9 +179,11 @@ def main():
         except Exception:
             pass
         raise
-    print("Blendit: rendered ->", out)
+    took = time.time() - started
+    print("Blendit: rendered in %s -> %s" % (_fmt_duration(took), out))
 
     if ns.open and os.path.isfile(out):
+        _notify_done(out, took)
         # Blender opens its own result so the Revit launcher can return immediately
         # (no blocking wait). startfile is Windows-only; harmless to guard.
         try:

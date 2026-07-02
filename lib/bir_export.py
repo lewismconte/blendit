@@ -4,6 +4,7 @@ Used by Load Model (extraction) and by Render Loaded Model / Open Model (which r
 the cache), so the extraction path is identical. IronPython 2.7 safe. The caller
 passes the active doc (it holds __revit__) and a report(msg) callback for output.
 """
+import json
 import os
 
 import bir_bootstrap
@@ -112,4 +113,88 @@ def refresh_cache(doc, cfg, report):
             os.remove(blend_path)  # the .blend no longer matches the geometry
     except Exception:
         pass
+    save_fingerprint(doc, cdir)    # remember what the model looked like at Load
     return bundle_ref, blend_path
+
+
+# --- staleness fingerprint ------------------------------------------------
+# Saved at Load Model time so Open Model / Render Loaded Model can warn when the
+# cached extraction no longer matches the model ("why is my new wall missing?").
+# Deliberately cheap and approximate: view name + visible element count + the
+# model file's mtime. A soft signal, never a blocker.
+_FINGERPRINT_NAME = "fingerprint.json"
+
+
+def _model_fingerprint(doc):
+    """-> {view, elements, file_mtime} for the CURRENT model state, or None when
+    it can't be computed (no doc / not a 3D view / headless)."""
+    if doc is None:
+        return None
+    try:
+        from bir_extract import revit_extract, _compat
+        if _compat.DB is None:
+            return None
+        view = revit_extract.active_3d_view(doc)
+        if view is None:
+            return None
+        count = (_compat.DB.FilteredElementCollector(doc, view.Id)
+                 .WhereElementIsNotElementType().GetElementCount())
+        mtime = 0
+        try:
+            path = doc.PathName
+            if path and os.path.isfile(path):
+                mtime = int(os.path.getmtime(path))
+        except Exception:
+            pass
+        return {"view": str(view.Name), "elements": int(count),
+                "file_mtime": mtime}
+    except Exception:
+        return None
+
+
+def save_fingerprint(doc, cdir):
+    fp = _model_fingerprint(doc)
+    if fp is None:
+        return
+    try:
+        f = open(os.path.join(cdir, _FINGERPRINT_NAME), "w")
+        try:
+            json.dump(fp, f, indent=2)
+        finally:
+            f.close()
+    except Exception:
+        pass
+
+
+def _load_fingerprint(cdir):
+    try:
+        f = open(os.path.join(cdir, _FINGERPRINT_NAME))
+        try:
+            data = json.load(f)
+        finally:
+            f.close()
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def staleness(doc):
+    """-> None when the cache looks fresh (or freshness is unknowable), else a
+    short human-readable reason it looks out of date."""
+    cdir, bundle_ref, _blend = cache_paths(doc)
+    if not os.path.isfile(bundle_ref):
+        return None
+    old = _load_fingerprint(cdir)
+    new = _model_fingerprint(doc)
+    if not old or not new:
+        return None
+    if old.get("view") != new.get("view"):
+        return ("the active 3D view is '%s' but '%s' was loaded"
+                % (new.get("view"), old.get("view")))
+    if old.get("elements") != new.get("elements"):
+        return ("the model has changed (%s elements now vs %s at Load)"
+                % (new.get("elements"), old.get("elements")))
+    if (old.get("file_mtime") and new.get("file_mtime")
+            and old.get("file_mtime") != new.get("file_mtime")):
+        return "the model file was saved since Load"
+    return None

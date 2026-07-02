@@ -31,7 +31,11 @@ class _NS(object):
 
 live._register_ui()
 live._BUILD_ARGS = _NS()
-live._deferred_build()      # runs the build synchronously here
+live._BUSY = True
+steps = 0
+while live._deferred_build() is not None:   # drive the staged build to completion
+    steps += 1
+assert steps >= 3, "expected multiple build stages, got %d" % steps
 
 assert live._SPEC is not None, "build did not set _SPEC"
 assert live._LOADED is not None, "build did not set _LOADED"

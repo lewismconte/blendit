@@ -8,6 +8,9 @@ engine, and the default render mode. Stored in
 __title__ = "Settings"
 __author__ = "Blendit"
 
+import os
+import subprocess
+
 import bir_bootstrap
 bir_bootstrap.ensure_paths()
 import bir_config
@@ -68,6 +71,52 @@ def _set_default_mode(cfg):
             return
 
 
+def _test_render():
+    """Prove the whole pipeline with the built-in demo scene - no model, no
+    Load, about half a minute. The new-user 'does my install work?' answer."""
+    from pyrevit import forms
+    import bir_ui
+    import bir_export
+    from bir_contract.transport import stamped_name
+    cfg = bir_config.load()
+    blender = bir_ui.ensure_blender(cfg, bir_ui.report)
+    if not blender:
+        return
+    bir_ui.report("**Blendit - test render** - rendering the built-in demo scene "
+                  "(no model needed) to prove the whole pipeline...")
+    cdir = bir_bootstrap.cache_dir_for("demo")
+    bundle_ref, _ = bir_export.export_bundle(None, cfg, bir_ui.report,
+                                             out_dir=cdir)
+    out_dir = cfg.get("output_dir") or bir_bootstrap.default_output_dir()
+    if not os.path.isdir(out_dir):
+        try:
+            os.makedirs(out_dir)
+        except Exception:
+            pass
+    png = os.path.join(out_dir, stamped_name("test_render", "png"))
+    log_path = os.path.splitext(png)[0] + ".log"
+    # Fixed fast settings (not the user's config): the point is a quick,
+    # predictable proof that Blender + the pipeline work end to end.
+    cmd = [blender, "--background", "--python",
+           bir_bootstrap.render_script_path(), "--",
+           "--bundle", bundle_ref, "--out", png, "--open",
+           "--mode", "realistic", "--engine", "CYCLES", "--samples", "32",
+           "--resolution", "960", "540"]
+    try:
+        logf = open(log_path, "wb")
+        try:
+            subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
+        finally:
+            logf.close()
+    except OSError as ex:
+        forms.alert("Couldn't launch Blender: %s" % ex,
+                    title="Blendit - Test render")
+        return
+    bir_ui.report("- test render started (about half a minute). **The image "
+                  "opens when it's done.**\n- output: `%s`\n- log (if it "
+                  "fails): `%s`" % (png, log_path))
+
+
 def _clear_cache():
     from pyrevit import forms
     choice = forms.alert(
@@ -114,6 +163,7 @@ def main():
             "Engine  (%s)" % cfg.get("engine"),
             "Default mode  (%s)" % bir_config.MODE_LABELS.get(cfg.get("mode"),
                                                               cfg.get("mode")),
+            "Test render (demo scene)",
             "Clear model cache",
             "Show all settings",
         ]
@@ -140,6 +190,9 @@ def main():
             bir_config.set_value("engine", new)
         elif choice.startswith("Default mode"):
             _set_default_mode(cfg)
+        elif choice == "Test render (demo scene)":
+            _test_render()
+            return                      # leave the loop; the report is on screen
         elif choice == "Clear model cache":
             _clear_cache()
         elif choice == "Show all settings":
