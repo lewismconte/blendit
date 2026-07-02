@@ -1882,7 +1882,13 @@ def main():
     _BUSY = True
     _BUSY_LABEL = "Building model"
     try:
-        bpy.app.timers.register(_deferred_build, first_interval=0.1)
+        # persistent=True is LOAD-BEARING: the build stages themselves load files
+        # (open_mainfile on the cached path, read_factory_settings inside
+        # reset_scene on the fresh path), and a file load removes non-persistent
+        # timers - the chain would die right after that stage, freezing the
+        # banner on the next label with the build never finishing.
+        bpy.app.timers.register(_deferred_build, first_interval=0.1,
+                                persistent=True)
     except Exception:
         while _deferred_build() is not None:   # no timers: run the stages inline
             pass

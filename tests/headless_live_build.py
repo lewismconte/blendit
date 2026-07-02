@@ -32,10 +32,23 @@ class _NS(object):
 live._register_ui()
 live._BUILD_ARGS = _NS()
 live._BUSY = True
+# Register the timer exactly as main() does. The build stages LOAD FILES
+# (read_factory_settings / open_mainfile), and a file load removes
+# non-persistent timers - the assert below is the regression guard for the
+# "banner frozen on 'Applying materials...'" bug (persistent=True is required).
+bpy.app.timers.register(live._deferred_build, first_interval=1000.0,
+                        persistent=True)
 steps = 0
 while live._deferred_build() is not None:   # drive the staged build to completion
     steps += 1
+    assert bpy.app.timers.is_registered(live._deferred_build), (
+        "the build timer was wiped by a file load at stage %d - main() must "
+        "register _deferred_build with persistent=True" % steps)
 assert steps >= 3, "expected multiple build stages, got %d" % steps
+try:
+    bpy.app.timers.unregister(live._deferred_build)
+except Exception:
+    pass
 
 assert live._SPEC is not None, "build did not set _SPEC"
 assert live._LOADED is not None, "build did not set _LOADED"
