@@ -60,14 +60,30 @@ def _fmt_duration(seconds):
 def _notify_done(png_path, seconds):
     """Best-effort Windows toast: the render landed, and how long it took.
     Purely additive (the PNG still auto-opens with --open); any failure is
-    swallowed - a missing toast must never break a finished render."""
+    swallowed - a missing toast must never break a finished render.
+
+    Windows only DELIVERS toasts for a registered AppUserModelID (an unknown
+    id fails silently), so the script first idempotently registers 'Blendit'
+    under HKCU\\Software\\Classes\\AppUserModelId - same as bir_ui.toast on
+    the Revit side."""
     try:
+        import base64
         import subprocess
         title = "Blendit"
         body = "Render finished in %s" % _fmt_duration(seconds)
         img_uri = "file:///" + png_path.replace("\\", "/").replace("'", "''")
+        icon = os.path.join(_repo_root(), "Blendit.tab", "Render.panel",
+                            "About.pushbutton", "icon.png")
+        reg = ("$k='HKCU:\\SOFTWARE\\Classes\\AppUserModelId\\Blendit';"
+               "if (-not (Test-Path $k)) { New-Item -Path $k -Force "
+               "| Out-Null };"
+               "Set-ItemProperty -Path $k -Name DisplayName -Value 'Blendit';")
+        if os.path.isfile(icon):
+            reg += ("Set-ItemProperty -Path $k -Name IconUri -Value '"
+                    + icon.replace("'", "''") + "';")
         ps = (
-            "[Windows.UI.Notifications.ToastNotificationManager, "
+            reg
+            + "[Windows.UI.Notifications.ToastNotificationManager, "
             "Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null;"
             "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, "
             "ContentType=WindowsRuntime] | Out-Null;"
@@ -80,8 +96,9 @@ def _notify_done(png_path, seconds):
             "[Windows.UI.Notifications.ToastNotificationManager]::"
             "CreateToastNotifier('Blendit').Show($t)"
         )
-        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
-                          "-Command", ps])
+        b64 = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+        subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive",
+                          "-WindowStyle", "Hidden", "-EncodedCommand", b64])
     except Exception:
         pass
 

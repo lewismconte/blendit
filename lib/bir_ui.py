@@ -216,11 +216,26 @@ def _xml_escape(s):
     return s
 
 
+def _toast_icon():
+    """A PNG to brand the Blendit toasts with, or None."""
+    import os
+    import bir_bootstrap
+    p = os.path.join(bir_bootstrap.REPO_ROOT, "Blendit.tab", "Render.panel",
+                     "About.pushbutton", "icon.png")
+    return p if os.path.isfile(p) else None
+
+
 def toast(message, title="Blendit", image=None):
     """Fire-and-forget Windows toast via a hidden PowerShell (WinRT). The
     polite alternative to a modal alert. `image` (a PNG path) becomes the
     toast's hero image. Returns True if launched; never raises - missing
-    toast support must never break a button."""
+    toast support must never break a button.
+
+    Windows only DELIVERS toasts for a registered AppUserModelID - an
+    unknown id fails silently (Show() succeeds, nothing appears). So the
+    script first (idempotently) registers 'Blendit' under
+    HKCU\\Software\\Classes\\AppUserModelId (user-writable, no admin), the
+    documented route for unpackaged apps."""
     try:
         import base64
         import os
@@ -232,9 +247,18 @@ def toast(message, title="Blendit", image=None):
         xml = ('<toast><visual><binding template="ToastGeneric"><text>'
                + _xml_escape(title) + "</text><text>" + _xml_escape(message)
                + "</text>" + img + "</binding></visual></toast>")
+        reg = ("$k='HKCU:\\SOFTWARE\\Classes\\AppUserModelId\\Blendit';"
+               "if (-not (Test-Path $k)) { New-Item -Path $k -Force "
+               "| Out-Null };"
+               "Set-ItemProperty -Path $k -Name DisplayName -Value 'Blendit';")
+        icon = _toast_icon()
+        if icon:
+            reg += ("Set-ItemProperty -Path $k -Name IconUri -Value '"
+                    + icon.replace("'", "''") + "';")
         # -EncodedCommand sidesteps every quoting pitfall; the XML is safe
         # inside PS single quotes because _xml_escape removed the apostrophes.
-        ps = ("[Windows.UI.Notifications.ToastNotificationManager, "
+        ps = (reg
+              + "[Windows.UI.Notifications.ToastNotificationManager, "
               "Windows.UI.Notifications, ContentType=WindowsRuntime] "
               "| Out-Null;"
               "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom."
