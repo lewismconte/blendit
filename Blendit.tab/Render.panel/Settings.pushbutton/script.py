@@ -61,13 +61,14 @@ def _set_samples(cfg):
 
 def _set_default_mode(cfg):
     from pyrevit import forms
+    import bir_ui
     labels = [bir_config.MODE_LABELS[k] for k in bir_config.MODES]
     choice = forms.CommandSwitchWindow.show(labels, message="Default render mode")
     if not choice:
         return
     for key in bir_config.MODES:
         if bir_config.MODE_LABELS[key] == choice:
-            bir_config.set_value("mode", key)
+            bir_ui.set_mode(key)    # same toast + tooltip refresh as the ribbon
             return
 
 

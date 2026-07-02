@@ -12,6 +12,7 @@ __author__ = "Blendit"
 import bir_bootstrap
 bir_bootstrap.ensure_paths()
 import bir_config
+import bir_ui
 
 
 def main():
@@ -27,10 +28,10 @@ def main():
     cfg = bir_config.load()
     cfg.update(preset)
     if bir_config.save(cfg):
-        forms.alert("Quality: %s\n\nEngine: %s\nSamples: %s\nDenoise: %s"
-                    % (choice, preset["engine"], preset["samples"],
-                       "on" if preset["denoise"] else "off"),
-                    title="Blendit - Quality")
+        # The user just chose from a dialog; don't make them dismiss another.
+        bir_ui.toast("Quality: %s  -  %s, %s samples, denoise %s"
+                     % (choice, preset["engine"], preset["samples"],
+                        "on" if preset["denoise"] else "off"))
     else:
         forms.alert("Couldn't save the quality preset (is the config file "
                     "locked?). Nothing was changed.", title="Blendit - Quality")

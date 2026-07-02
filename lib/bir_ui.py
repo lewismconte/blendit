@@ -177,22 +177,26 @@ def ensure_3d_view(doc, report=None):
 
 
 def set_mode(key):
-    """Set the render mode in config and confirm (shared by the Mode buttons).
-    Reports honestly when the config file couldn't be written."""
+    """Set the render mode (shared by the Mode buttons). Deliberately
+    popup-free: picking a mode is a one-click action, not a dialog
+    conversation - feedback is a passive toast (auto-dismisses, steals no
+    focus, stacks no windows) carrying the mode's preview image, plus a
+    refreshed Mode-pulldown tooltip. Only a FAILED save interrupts."""
     import bir_config
     ok = bir_config.set_value("mode", key)
     label = bir_config.MODE_LABELS.get(key, key)
-    if ok:
-        msg = "Render mode set to: %s" % label
-        show_mode_preview_once(key)
-    else:
+    if not ok:
         msg = ("Couldn't save the render mode (is the config file locked or "
                "read-only?). Nothing was changed.")
-    try:
-        from pyrevit import forms
-        forms.alert(msg, title="Blendit")
-    except Exception:
-        print(msg)
+        try:
+            from pyrevit import forms
+            forms.alert(msg, title="Blendit")
+        except Exception:
+            print(msg)
+        return
+    ensure_mode_tooltips()          # in case startup ran before the ribbon existed
+    toast("Render mode: %s" % label, image=mode_preview_path(key))
+    update_mode_tooltip(label)
 
 
 def mode_preview_path(key):
@@ -203,24 +207,161 @@ def mode_preview_path(key):
                         "%s.png" % key)
 
 
-def show_mode_preview_once(key):
-    """The FIRST time a mode is picked, show what it looks like (the built-in
-    demo scene) in the output window - visual onboarding without a nag. Seen
-    modes are remembered in the config."""
-    import os
-    import bir_config
-    seen = bir_config.get_value("previewed_modes", []) or []
-    if key in seen:
-        return
-    path = mode_preview_path(key)
-    if not os.path.isfile(path):
-        return
+# --- passive feedback: Windows toast ----------------------------------------
+def _xml_escape(s):
+    s = str(s)
+    for a, b in (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"),
+                 ('"', "&quot;"), ("'", "&apos;")):
+        s = s.replace(a, b)
+    return s
+
+
+def toast(message, title="Blendit", image=None):
+    """Fire-and-forget Windows toast via a hidden PowerShell (WinRT). The
+    polite alternative to a modal alert. `image` (a PNG path) becomes the
+    toast's hero image. Returns True if launched; never raises - missing
+    toast support must never break a button."""
     try:
-        from pyrevit import script
-        out = script.get_output()
-        out.print_md("**%s** looks like this (built-in demo scene):"
-                     % bir_config.MODE_LABELS.get(key, key))
-        out.print_image(path)
-        bir_config.set_value("previewed_modes", list(seen) + [key])
+        import base64
+        import os
+        img = ""
+        if image and os.path.isfile(image):
+            img = ('<image placement="hero" src="'
+                   + _xml_escape("file:///" + image.replace("\\", "/"))
+                   + '"/>')
+        xml = ('<toast><visual><binding template="ToastGeneric"><text>'
+               + _xml_escape(title) + "</text><text>" + _xml_escape(message)
+               + "</text>" + img + "</binding></visual></toast>")
+        # -EncodedCommand sidesteps every quoting pitfall; the XML is safe
+        # inside PS single quotes because _xml_escape removed the apostrophes.
+        ps = ("[Windows.UI.Notifications.ToastNotificationManager, "
+              "Windows.UI.Notifications, ContentType=WindowsRuntime] "
+              "| Out-Null;"
+              "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom."
+              "XmlDocument, ContentType=WindowsRuntime] | Out-Null;"
+              "$x = New-Object Windows.Data.Xml.Dom.XmlDocument;"
+              "$x.LoadXml('" + xml + "');"
+              "$t = New-Object Windows.UI.Notifications.ToastNotification $x;"
+              "[Windows.UI.Notifications.ToastNotificationManager]::"
+              "CreateToastNotifier('Blendit').Show($t)")
+        b64 = base64.b64encode(ps.encode("utf-16-le"))
+        if not isinstance(b64, str):
+            b64 = b64.decode("ascii")
+        from System.Diagnostics import Process, ProcessStartInfo
+        psi = ProcessStartInfo(
+            "powershell.exe",
+            "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand "
+            + b64)
+        psi.CreateNoWindow = True
+        psi.UseShellExecute = False
+        Process.Start(psi)
+        return True
+    except Exception:
+        return False
+
+
+# --- ribbon hover tooltips (previews live on hover, not in popups) ----------
+# The mode key -> the ribbon button label (each Mode script's __title__).
+MODE_BUTTON_TEXT = {
+    "realistic": "Realistic", "white": "White", "shadow": "Shadow",
+    "specular": "Specular", "linework": "Linework", "pen": "Pen",
+    "sketch": "Sketch", "cel": "Cel", "hatch": "Hatch",
+}
+
+_TOOLTIPS_DONE = [False]
+
+
+def find_ribbon_item(text, tab_title="Blendit"):
+    """The AdWindows RibbonItem on our tab whose label equals `text`, or None.
+    Raw AdWindows walk (stable API, no pyRevit-version coupling); callers
+    guard the import."""
+    import Autodesk.Windows as adw
+
+    def _walk(items):
+        for it in items:
+            t = getattr(it, "Text", None)
+            if t and str(t).replace("\r", " ").replace("\n", " ") == text:
+                return it
+            kids = getattr(it, "Items", None)
+            if kids:
+                found = _walk(kids)
+                if found is not None:
+                    return found
+        return None
+
+    for tab in adw.ComponentManager.Ribbon.Tabs:
+        if tab.Title == tab_title:
+            for panel in tab.Panels:
+                found = _walk(panel.Source.Items)
+                if found is not None:
+                    return found
+    return None
+
+
+def set_ribbon_tooltip_image(text, image_path):
+    """Attach a preview image to a ribbon item's extended (hover) tooltip."""
+    try:
+        import os
+        if not os.path.isfile(image_path):
+            return False
+        import Autodesk.Windows as adw
+        from System import Uri
+        from System.Windows.Media.Imaging import BitmapImage
+        item = find_ribbon_item(text)
+        if item is None:
+            return False
+        tip = item.ToolTip
+        if not isinstance(tip, adw.RibbonToolTip):
+            new_tip = adw.RibbonToolTip()
+            new_tip.Title = text
+            if tip:
+                new_tip.Content = str(tip)
+            tip = new_tip
+        tip.ExpandedImage = BitmapImage(Uri(image_path))
+        item.ToolTip = tip
+        return True
+    except Exception:
+        return False
+
+
+def set_ribbon_tooltip_text(text, tooltip):
+    """Set / refresh a ribbon item's hover tooltip text."""
+    try:
+        import Autodesk.Windows as adw
+        item = find_ribbon_item(text)
+        if item is None:
+            return False
+        tip = item.ToolTip
+        if isinstance(tip, adw.RibbonToolTip):
+            tip.Content = tooltip
+        else:
+            item.ToolTip = tooltip
+        return True
+    except Exception:
+        return False
+
+
+def update_mode_tooltip(label):
+    """Hovering the Mode pulldown answers 'what is it set to right now?'."""
+    set_ribbon_tooltip_text(
+        "Mode", "Render mode for the next render.\nCurrent: %s" % label)
+
+
+def ensure_mode_tooltips(force=False):
+    """Attach every mode's preview image to its button tooltip + reflect the
+    current mode on the pulldown. Idempotent and cheap; called from startup.py
+    AND on first mode use, because startup may run before the ribbon exists."""
+    if _TOOLTIPS_DONE[0] and not force:
+        return
+    import bir_config
+    ok_any = False
+    for key, text in MODE_BUTTON_TEXT.items():
+        if set_ribbon_tooltip_image(text, mode_preview_path(key)):
+            ok_any = True
+    try:
+        cur = bir_config.get_value("mode")
+        update_mode_tooltip(bir_config.MODE_LABELS.get(cur, cur))
     except Exception:
         pass
+    if ok_any:
+        _TOOLTIPS_DONE[0] = True

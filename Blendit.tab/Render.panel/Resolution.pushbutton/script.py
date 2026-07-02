@@ -6,6 +6,7 @@ __author__ = "Blendit"
 import bir_bootstrap
 bir_bootstrap.ensure_paths()
 import bir_config
+import bir_ui
 
 
 def main():
@@ -19,8 +20,8 @@ def main():
     for label, res in bir_config.RESOLUTIONS:
         if label == choice:
             if bir_config.set_value("resolution", res):
-                forms.alert("Resolution: %s  (%sx%s)" % (label, res[0], res[1]),
-                            title="Blendit - Resolution")
+                # The user just chose from a dialog; no second one to dismiss.
+                bir_ui.toast("Resolution: %s  (%sx%s)" % (label, res[0], res[1]))
             else:
                 forms.alert("Couldn't save the resolution (is the config file "
                             "locked?). Nothing was changed.",
