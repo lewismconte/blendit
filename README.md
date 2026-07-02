@@ -90,8 +90,8 @@ quality. That's the whole workflow.
 
 Blendit works today, and it's built to grow. On the roadmap:
 
-- 🔴 **Live sync** — edit in Revit and watch the Blender view update in real time
-  (Enscape-style), streaming only what changed.
+- 🔴 **Live sync** — edit in Revit and watch the Blender view update in real time,
+  streaming only what changed.
 - 🌳 **Entourage & assets** — a library of procedural trees, people and cars you can
   scatter into a scene (and round-trip back to Revit as lightweight placeholders).
 - 🧱 **Richer materials** — pull real textures and colours from Revit's own material
