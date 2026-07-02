@@ -108,11 +108,28 @@ def _region(area, rtype="WINDOW"):
     return None
 
 
-def _run_in_view3d(op):
+def _view3d_ctx(context=None):
+    """(window, area, region) to run a view op in. Prefer the context the user
+    actually pressed the key / clicked the button in (its VIEW_3D + WINDOW
+    region); fall back to the first 3D view (timers have no context)."""
+    try:
+        if context is not None and getattr(context, "area", None) is not None \
+                and context.area.type == "VIEW_3D":
+            region = _region(context.area)
+            if region is not None:
+                return context.window, context.area, region
+    except Exception:
+        pass
     win, area = _first_view3d()
     if area is None:
+        return None, None, None
+    return win, area, _region(area)
+
+
+def _run_in_view3d(op, context=None):
+    win, area, region = _view3d_ctx(context)
+    if area is None:
         return
-    region = _region(area)
     try:
         if hasattr(bpy.context, "temp_override"):
             with bpy.context.temp_override(window=win, area=area, region=region):
@@ -120,7 +137,11 @@ def _run_in_view3d(op):
         else:
             op({"window": win, "area": area, "region": region})
     except Exception:
-        pass
+        # Never fatal - but never SILENT either: a swallowed camera/view op is
+        # exactly how a capture ends up shooting the wrong pose.
+        import traceback
+        print("Blendit: view3d op failed:")
+        traceback.print_exc()
 
 
 def _redraw_all():
@@ -288,12 +309,16 @@ def _update_camera(self, context):
     _reapply_camera()
 
 
-def _snap_camera_to_view():
+def _snap_camera_to_view(context=None):
     """Snap the export camera to the current view, then re-assert the chosen
     Projection so Two-Point / Ortho actually land in the capture / render / export.
     camera_to_view() copies the raw viewport orientation onto the camera, which would
-    otherwise undo the levelling when composing outside Frame View."""
-    _run_in_view3d(lambda: bpy.ops.view3d.camera_to_view())
+    otherwise undo the levelling when composing outside Frame View.
+
+    MUST be called from the operator's execute (pass its `context`), NOT from a
+    deferred timer: the snap has to capture the pose at the instant the user
+    pressed the button, in the viewport they pressed it in."""
+    _run_in_view3d(lambda: bpy.ops.view3d.camera_to_view(), context)
     _reapply_camera()
 
 
@@ -911,9 +936,12 @@ def _init_materials():
 
 
 # --- operators --------------------------------------------------------------
+# ORDERING RULE for every capture-ish operator: snap the camera SYNCHRONOUSLY
+# in execute() (real UI context, the exact viewport the user acted in), then
+# defer only the SLOW work behind the busy banner. Snapping inside the timer
+# captured the pose too late / from a rebuilt context - the blue-sky-capture bug.
 def _do_capture():
     global _STATUS
-    _snap_camera_to_view()
     out = _next_capture_path()
     sc = bpy.context.scene
     sc.render.image_settings.file_format = "PNG"
@@ -929,6 +957,7 @@ class BIR_OT_render_image(bpy.types.Operator):
     bl_description = "Snap the camera to your current view and render a PNG"
 
     def execute(self, context):
+        _snap_camera_to_view(context)      # NOW, in the user's own viewport
         # Deferred via _run_busy so the WORKING banner paints before the
         # (blocking) render - same treatment as Render Final / Regenerate.
         _run_busy("Rendering capture", _do_capture)
@@ -951,12 +980,11 @@ class BIR_OT_toggle_mode(bpy.types.Operator):
 def _do_regenerate_lines():
     from blender.pipeline import npr
     if npr._active_lineart_mod() is None:
-        return                      # not a line mode - don't move the camera
-    # Thaw any frozen bake so the new settings + camera take effect on a fresh trace.
+        return                      # not a line mode
+    # The camera was already snapped in the operator's execute (Line Art is
+    # camera-relative). Thaw any frozen bake so the new settings + camera take
+    # effect, push the current settings onto the modifier, and re-trace.
     npr.unbake_line_art()
-    # Line Art is camera-relative, so first snap the camera to what you're looking
-    # at; then push the current settings onto the modifier and force a re-trace.
-    _snap_camera_to_view()
     st = getattr(bpy.context.scene, "bir", None)
     if st is not None:
         npr.set_line_art_crease(st.line_crease)
@@ -978,6 +1006,9 @@ class BIR_OT_regenerate_lines(bpy.types.Operator):
                      "(orbit freely, then regenerate to refresh the lines)")
 
     def execute(self, context):
+        from blender.pipeline import npr
+        if npr._active_lineart_mod() is not None:   # line modes only:
+            _snap_camera_to_view(context)           # don't move the camera otherwise
         _run_busy("Regenerating lines", _do_regenerate_lines)
         return {"FINISHED"}
 
@@ -988,8 +1019,7 @@ def _do_render_final():
     # Cycles; NPR (Line Art / toon) stays EEVEE since that's where it renders.
     sc = bpy.context.scene
     st = getattr(sc, "bir", None)
-    _snap_camera_to_view()
-    _enter_frame()
+    _enter_frame()          # camera was snapped in the operator's execute
     samples = int(st.final_samples) if st is not None else 200
     npr_mode = bool(st is not None and st.mode in _LINE_MODES)
     prev_engine = sc.render.engine
@@ -1033,6 +1063,7 @@ class BIR_OT_render_final(bpy.types.Operator):
                      "modes, EEVEE for line modes), saved to /finals and opened")
 
     def execute(self, context):
+        _snap_camera_to_view(context)      # NOW, in the user's own viewport
         _run_busy("Rendering final", _do_render_final)
         return {"FINISHED"}
 
@@ -1052,16 +1083,15 @@ class BIR_OT_open_captures(bpy.types.Operator):
 
 
 def _do_export_vector(fmt):
-    """Export the current line work as a scalable vector. Snap the camera to the
-    view first so the drawing matches what you see (Line Art is camera-relative),
-    then write to <output>/vectors and open it."""
+    """Export the current line work as a scalable vector (the camera was snapped
+    in the operator's execute; Line Art is camera-relative), written to
+    <output>/vectors and opened."""
     global _STATUS
     from blender.pipeline import vector_export
     if not vector_export.has_line_art():
         _STATUS = ("Vector export needs a line mode "
                    "(Linework / Pen / Sketch / Cel / Hatch).")
         return
-    _snap_camera_to_view()
     _enter_frame()                       # WYSIWYG: the export frame == what you see
     out = _next_vector_path(fmt)
     try:
@@ -1085,6 +1115,9 @@ class BIR_OT_export_vector(bpy.types.Operator):
     fmt: bpy.props.StringProperty(default="svg", options={"HIDDEN"})
 
     def execute(self, context):
+        from blender.pipeline import vector_export
+        if vector_export.has_line_art():        # don't move the camera just to
+            _snap_camera_to_view(context)       # report "needs a line mode"
         fmt = (self.fmt or "svg").lower()
         _run_busy("Exporting %s" % fmt.upper(), lambda: _do_export_vector(fmt))
         return {"FINISHED"}
