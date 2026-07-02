@@ -139,7 +139,7 @@ class BIR_CloudSettings(bpy.types.PropertyGroup):
     domain_shape: EnumProperty(
         name="Domain", default="BOX",
         items=[("BOX", "Box", "A rectangular slab of sky"),
-               ("TORUS", "Ring (360)", "A ring of cloud around a centred camera - every "
+               ("TORUS", "Ring (360)", "A ring of cloud around the scene - every "
                 "direction shows an approaching storm. Great for cumulonimbus.")],
         update=_on_param)
     size: FloatVectorProperty(name="Domain Size", size=3, default=(380, 380, 110),
@@ -153,8 +153,8 @@ class BIR_CloudSettings(bpy.types.PropertyGroup):
                              description="Horizontal depth of the cloud wall", update=_on_param)
     ring_height: FloatProperty(name="Ring Height", default=320.0, min=5.0,
                                description="Vertical extent of the storm wall", update=_on_param)
-    ring_center_cam: BoolProperty(name="Centre Camera in Ring", default=True,
-                                  description="Move the camera to the middle of the ring")
+    # NOTE: no "centre camera in ring" option. It teleported + re-rotated the
+    # scene camera, destroying the composed Revit view - removed on request.
 
     shape_scale: FloatProperty(name="Shape Scale", default=0.95, min=0.05, soft_max=10,
                                description="Size of the main cloud masses (lower = bigger)",
@@ -536,13 +536,13 @@ def build_domain(context, s):
     obj.data.materials.clear()
     obj.data.materials.append(mat)
 
-    if s.domain_shape == "TORUS" and s.ring_center_cam:
-        cam = context.scene.camera or bpy.data.objects.get("Camera")
-        if cam is not None:
-            cam.location = (0.0, 0.0, s.altitude + s.ring_height * 0.45)
-            cam.rotation_euler = (1.5708, 0.0, 0.0)
-            if cam.data:
-                cam.data.clip_end = max(cam.data.clip_end, s.ring_radius * 3.0)
+    # The ring sits around the scene origin; never touch the user's camera
+    # (an earlier "centre camera in ring" option moved it - composition killer).
+    # Just make sure the far clip reaches the storm wall so it stays visible.
+    if s.domain_shape == "TORUS":
+        cam = context.scene.camera
+        if cam is not None and cam.data:
+            cam.data.clip_end = max(cam.data.clip_end, s.ring_radius * 3.0)
     return obj
 
 

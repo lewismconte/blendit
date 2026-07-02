@@ -1385,7 +1385,6 @@ class BIR_PT_atmo_domain(_Sub, bpy.types.Panel):
             layout.prop(s, "ring_radius")
             layout.prop(s, "ring_tube")
             layout.prop(s, "ring_height")
-            layout.prop(s, "ring_center_cam")
         else:
             layout.prop(s, "size")
         layout.prop(s, "altitude")
