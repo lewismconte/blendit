@@ -1,9 +1,23 @@
 """Active 3D view sun -> contract `sun` dict.
 
-Revit's SunAndShadowSettings exposes Altitude + Azimuth at the active frame
-directly, so we emit `direct` mode (no solar calc needed). Lat/long from the site
-location are carried along for reference / future geographic mode.
+WHAT ARCHITECTS NEED: shadows that match the model's real place and time.
+Extraction rules (user-specified):
+  * The site location (SiteLocation Latitude/Longitude/TimeZone) is ALWAYS
+    carried - Melbourne in Revit is Melbourne in Blender.
+  * StillImage sun setting: the exact date + time of the view, plus Revit's
+    own computed world-space azimuth/altitude when available.
+  * One-day / multi-day solar studies (a time RANGE, no single truth): the
+    study's start date at MIDDAY.
+  * The 'Lighting' preset (Revit's default; usually RELATIVE TO VIEW, so its
+    angles mean nothing in world space): keep the location, default to
+    MIDDAY - a plausible, location-accurate sun instead of a hardcoded one.
+
+The Blender side (pipeline/world.py) computes azimuth/altitude from
+lat/long + date/time (pipeline/sun_calc.py) and cross-checks any direct
+angles against that, so a bad angle extraction can never silently produce
+wrong shadows.
 """
+import datetime
 import math
 
 from bir_extract import _compat
@@ -13,21 +27,17 @@ DB = _compat.DB
 
 def extract_sun(doc, view3d):
     sun = {"mode": "geographic", "latitude": None, "longitude": None,
-           "timezone": None, "azimuth_degrees": None, "altitude_degrees": None,
+           "timezone": None, "date": None, "time": None,
+           "azimuth_degrees": None, "altitude_degrees": None,
            "strength": 1.0, "angle_degrees": 0.526}
+    _site_location(doc, sun)
+    _sun_settings(view3d, sun)
+    if sun["azimuth_degrees"] is not None and sun["altitude_degrees"] is not None:
+        sun["mode"] = "direct"
+    return sun
 
-    try:
-        sass = view3d.SunAndShadowSettings
-        if sass is not None:
-            frame = sass.ActiveFrame
-            az = sass.GetFrameAzimuth(frame)    # radians
-            alt = sass.GetFrameAltitude(frame)  # radians
-            sun["mode"] = "direct"
-            sun["azimuth_degrees"] = math.degrees(az)
-            sun["altitude_degrees"] = math.degrees(alt)
-    except Exception:
-        pass
 
+def _site_location(doc, sun):
     try:
         site = doc.SiteLocation
         sun["latitude"] = math.degrees(site.Latitude)    # stored in radians
@@ -39,4 +49,56 @@ def extract_sun(doc, view3d):
     except Exception:
         pass
 
-    return sun
+
+def _fmt_date(dt):
+    return "%04d-%02d-%02d" % (dt.Year, dt.Month, dt.Day)
+
+
+def _fmt_time(dt):
+    return "%02d:%02d" % (dt.Hour, dt.Minute)
+
+
+def _sun_settings(view3d, sun):
+    try:
+        sst = view3d.SunAndShadowSettings
+    except Exception:
+        sst = None
+    if sst is None:
+        # No sun settings at all: location-accurate midday, today.
+        today = datetime.date.today()
+        sun["date"] = "%04d-%02d-%02d" % (today.year, today.month, today.day)
+        sun["time"] = "12:00"
+        return
+
+    stype = None
+    try:
+        stype = sst.SunAndShadowType
+    except Exception:
+        pass
+    still = (DB is not None and stype == DB.SunAndShadowType.StillImage)
+
+    # Date + time: exact for a still; MIDDAY of the start date for studies and
+    # anything else (a range has no single truth - the agreed default).
+    try:
+        start = sst.StartDateAndTime
+        sun["date"] = _fmt_date(start)
+        sun["time"] = _fmt_time(start) if still else "12:00"
+    except Exception:
+        today = datetime.date.today()
+        sun["date"] = "%04d-%02d-%02d" % (today.year, today.month, today.day)
+        sun["time"] = "12:00"
+
+    # Revit's own angles, ONLY when they are world space. The default
+    # 'Lighting' preset is usually relative-to-view - those angles are
+    # meaningless for shadows, so skip them and let location + time drive.
+    try:
+        if still:
+            frame = sst.ActiveFrame
+            sun["azimuth_degrees"] = math.degrees(sst.GetFrameAzimuth(frame))
+            sun["altitude_degrees"] = math.degrees(sst.GetFrameAltitude(frame))
+        elif (DB is not None and stype == DB.SunAndShadowType.Lighting
+                and not getattr(sst, "RelativeToView", True)):
+            sun["azimuth_degrees"] = math.degrees(sst.Azimuth)
+            sun["altitude_degrees"] = math.degrees(sst.Altitude)
+    except Exception:
+        pass
