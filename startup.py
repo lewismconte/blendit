@@ -16,9 +16,20 @@ for _p in (_ROOT, os.path.join(_ROOT, "lib")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+# SILENT by design: pyRevit pops an output window for anything a startup
+# script prints, on every reload. Breadcrumbs go to the debug logger instead
+# (visible only in pyRevit debug mode).
+try:
+    from pyrevit.coreutils import logger as _pyrevit_logger
+    _log = _pyrevit_logger.get_logger("Blendit.startup")
+except Exception:
+    _log = None
+
 try:
     import bir_ui
     bir_ui.ensure_mode_tooltips(force=True)
-    print("Blendit startup: mode previews attached to the ribbon tooltips")
+    if _log:
+        _log.debug("mode previews attached to the ribbon tooltips")
 except Exception as ex:
-    print("Blendit startup: tooltip decoration skipped (%s)" % ex)
+    if _log:
+        _log.debug("tooltip decoration skipped (%s)" % ex)
