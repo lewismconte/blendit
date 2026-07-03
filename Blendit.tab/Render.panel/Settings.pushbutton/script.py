@@ -122,7 +122,7 @@ def _clear_cache():
     from pyrevit import forms
     choice = forms.alert(
         "Delete all cached model extractions and prepared scenes?\n\n"
-        "The next Load Model re-extracts from scratch. Close any open Blendit "
+        "The next Load View re-extracts from scratch. Close any open Blendit "
         "Blender sessions first.",
         title="Blendit - Clear model cache",
         options=["Clear cache", "Cancel"])

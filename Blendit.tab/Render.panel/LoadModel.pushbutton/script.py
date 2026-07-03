@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Load the active 3D view into Blendit's model cache.
+"""Load the active view into Blendit's model cache.
 
 This is the one slow step (it tessellates the whole view), so it is explicit and
 shows a progress bar - no surprise long operations hidden behind a render button.
-It does NOT open Blender; once loaded, use **Open Model** to view it interactively
-or **Render Loaded Model** to render it headless. Re-run after you change the model.
+It does NOT open Blender; once loaded, use **Open View** to work it interactively
+or **Render Loaded** to render it headless. Re-run after you change the model.
 """
-__title__ = "Load\nModel"
+__title__ = "Load\nView"
 __author__ = "Blendit"
 
 import bir_bootstrap
@@ -22,13 +22,13 @@ def main():
     doc = _active_doc()
     if not _ensure_3d_view(doc, _report):     # need a 3D view to extract
         return
-    _report("**Blendit - Load Model** - extracting the active 3D view. This can take "
+    _report("**Blendit - Load View** - extracting the active 3D view. This can take "
             "a while on a large model; the progress bar shows it working.")
 
     bundle_ref, _blend = bir_export.refresh_cache(doc, cfg, _report)
 
-    _report("- **model loaded.** Now press **Open Model** to view it in Blender, or "
-            "**Render Loaded Model** to render it as-is.\n- cache: `%s`" % bundle_ref)
+    _report("- **view loaded.** Now press **Open View** to work it in Blender, or "
+            "**Render Loaded** to render it as-is.\n- cache: `%s`" % bundle_ref)
 
 
 main()

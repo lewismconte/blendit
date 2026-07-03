@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Render the LOADED model as-is, headless (no interactive Blender).
+"""Render the LOADED view as-is, headless (no interactive Blender).
 
-Renders the model you've already loaded - the whole view, in the configured
+Renders the view you've already loaded - the whole view, in the configured
 Mode / Quality / Resolution - in the background. Use this when you just want a
 straight render of the current view without composing in Blender; for a chosen
-shot, use **Open Model** and render from the N-panel instead.
+shot, use **Open View** and render from the N-panel instead.
 
 Honest by design: this can take a while on a large model (Cycles especially), but
-Revit stays free and the image opens when it's done. You can't render a model that
-isn't loaded - press **Load Model** first.
+Revit stays free and the image opens when it's done. You can't render a view that
+isn't loaded - press **Load View** first.
 
 Shift+Click: the same render at FINAL quality (Cycles, high samples, denoised)
 - liked the draft? One click gets the keeper, without touching your Quality

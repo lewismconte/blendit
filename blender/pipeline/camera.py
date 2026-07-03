@@ -37,6 +37,25 @@ PERSP = "PERSP"
 TWO_POINT = "TWO_POINT"
 ORTHO = "ORTHO"
 
+# 2D drawing directions -> (view forward, page-up hint) in Blender world axes.
+# Revit exports Z-up with +X = East, +Y = North, so a plan looks down -Z with
+# North (+Y) at the top of the sheet, and an elevation is NAMED for the facade it
+# faces: the "North" elevation shows the north-facing wall, viewed from the north
+# looking south (forward = -Y), which puts East on the left and West on the right,
+# the standard architectural convention.
+DRAWING_DIRECTIONS = {
+    "plan":    ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),   # look down, North up
+    "ceiling": ((0.0, 0.0, 1.0),  (0.0, 1.0, 0.0)),   # look up  (reflected ceiling)
+    "north":   ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),   # north-facing facade
+    "south":   ((0.0, 1.0, 0.0),  (0.0, 0.0, 1.0)),
+    "east":    ((-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),   # east-facing facade
+    "west":    ((1.0, 0.0, 0.0),  (0.0, 0.0, 1.0)),
+}
+
+# The ground plane spans the whole site; a drawing must frame the BUILDING, so the
+# 2D framing / cut excludes it from the bounding box (it still renders as a ground line).
+_DRAWING_BBOX_EXCLUDE = ("BIR_Ground",)
+
 
 def setup_camera(spec, scale):
     cspec = spec.get("camera", {})
@@ -130,6 +149,104 @@ def convert_projection(cam_obj, mode, focal_mm=None, extra_shift=0.0):
         # near-vertical view: two-point is undefined, fall back to plain perspective.
     cam_data.shift_x = 0.0
     cam_data.shift_y = float(extra_shift)
+
+
+def frame_ortho_drawing(cam_obj, direction, ortho_scale=None, aspect=1.0,
+                        margin=DEFAULT_MARGIN):
+    """Pose `cam_obj` as an orthographic architectural drawing looking from
+    `direction` (a key in DRAWING_DIRECTIONS: plan / ceiling / north / south /
+    east / west), framed on the scene bounding box.
+
+    The camera is set to ORTHO with a HORIZONTAL sensor fit, so `ortho_scale`
+    always spans the sheet's WIDTH. Pass `ortho_scale` to force a scale-true frame
+    (world width the page covers, e.g. paper_width_m x scale_denominator); leave it
+    None to auto-fit the model onto the page. `aspect` is render_x / render_y and is
+    used to fit the model's height under the horizontal sensor. Clip planes are set
+    to enclose the model; a section cut layers on top via apply_section_cut().
+    Returns the camera object.
+    """
+    fwd_raw, up_raw = DRAWING_DIRECTIONS.get(direction, DRAWING_DIRECTIONS["plan"])
+    forward = mathutils.Vector(fwd_raw).normalized()
+    up_hint = mathutils.Vector(up_raw).normalized()
+    cam_data = cam_obj.data
+    cam_data.type = "ORTHO"
+    cam_data.sensor_fit = "HORIZONTAL"      # ortho_scale spans the page WIDTH
+    cam_data.shift_x = 0.0
+    cam_data.shift_y = 0.0
+
+    bb = _scene_bbox(exclude=_DRAWING_BBOX_EXCLUDE)
+    if bb is None:
+        cam_obj.rotation_euler = forward.to_track_quat("-Z", "Y").to_euler()
+        if ortho_scale:
+            cam_data.ortho_scale = float(ortho_scale)
+        return cam_obj
+    mn, mx = bb
+    center = (mn + mx) * 0.5
+
+    right = forward.cross(up_hint)
+    if right.length < 1e-9:
+        right = forward.cross(mathutils.Vector((0.0, 0.0, 1.0)))
+    if right.length < 1e-9:
+        right = mathutils.Vector((1.0, 0.0, 0.0))
+    right.normalize()
+    true_up = right.cross(forward).normalized()
+
+    corners = [mathutils.Vector((x, y, z))
+               for x in (mn.x, mx.x) for y in (mn.y, mx.y) for z in (mn.z, mx.z)]
+    ext_r = max(abs((c - center).dot(right)) for c in corners)      # half-width
+    ext_u = max(abs((c - center).dot(true_up)) for c in corners)    # half-height
+    ext_f = max(abs((c - center).dot(forward)) for c in corners)    # half-depth
+
+    if ortho_scale:
+        cam_data.ortho_scale = float(ortho_scale)
+    else:
+        # HORIZONTAL fit: width holds 2*ext_r; the visible height is
+        # ortho_scale / aspect, which must hold 2*ext_u -> ortho_scale >= 2*ext_u*aspect.
+        cam_data.ortho_scale = max(2.0 * ext_r, 2.0 * ext_u * aspect) * margin
+
+    dist = 2.0 * ext_f + 10.0               # parallel: distance only sets clipping
+    loc = center - forward * dist
+    # Build the pose from the (right, up, back) basis so the page-up is exact even
+    # for a plan (looking straight down, where to_track_quat's up is degenerate).
+    rot = mathutils.Matrix((
+        (right.x, true_up.x, -forward.x),
+        (right.y, true_up.y, -forward.y),
+        (right.z, true_up.z, -forward.z),
+    )).to_4x4()
+    cam_obj.matrix_world = mathutils.Matrix.Translation(loc) @ rot
+    cam_data.clip_start = 0.001
+    cam_data.clip_end = 2.0 * dist + 10.0
+    return cam_obj
+
+
+def apply_section_cut(cam_obj, t):
+    """Slice an orthographic drawing with a cut plane perpendicular to the view,
+    driven by the near clip. `t` in (0, 1] moves the cut from the near face (0, no
+    cut) toward the far face (1, everything clipped) along the view axis; t <= 0 or
+    None disables the cut and shows every edge. Recomputed from the camera's current
+    pose + the scene bbox, so it stays correct after a re-fit. This is what turns an
+    elevation into a section and a top view into a floor plan (probe-confirmed:
+    silhouette of the clipped geometry == the cut line, interior edges below read
+    as normal lines).
+    """
+    cam_data = cam_obj.data
+    bb = _scene_bbox(exclude=_DRAWING_BBOX_EXCLUDE)
+    if bb is None:
+        return
+    bpy.context.view_layer.update()         # matrix_world is lazy
+    forward = (cam_obj.matrix_world.to_quaternion()
+               @ mathutils.Vector((0.0, 0.0, -1.0))).normalized()
+    pos = cam_obj.matrix_world.translation
+    mn, mx = bb
+    corners = [mathutils.Vector((x, y, z))
+               for x in (mn.x, mx.x) for y in (mn.y, mx.y) for z in (mn.z, mx.z)]
+    ds = [(c - pos).dot(forward) for c in corners]
+    near, far = min(ds), max(ds)
+    if not t or t <= 0.0:
+        cam_data.clip_start = max(0.001, near - 1.0)   # in front of everything
+    else:
+        cam_data.clip_start = max(0.001, near + float(t) * (far - near))
+    cam_data.clip_end = far + 1.0
 
 
 def _recompose_shift(cam_obj, target, axes="y"):
@@ -241,12 +358,16 @@ def _configure_lens(cam_data, cspec, ortho):
         cam_data.lens = (cam_data.sensor_width / 2.0) / math.tan(fov / 2.0)
 
 
-def _scene_bbox():
+def _scene_bbox(exclude=None):
+    """Bounding box of all MESH objects (world space). `exclude` is a set of object
+    names to skip - the 2D drawing framing passes the ground plane so plans /
+    elevations frame the building, not the (much larger) ground."""
+    exclude = exclude or ()
     mn = [float("inf")] * 3
     mx = [float("-inf")] * 3
     found = False
     for obj in bpy.context.scene.objects:
-        if obj.type != "MESH":
+        if obj.type != "MESH" or obj.name in exclude:
             continue
         found = True
         mw = obj.matrix_world

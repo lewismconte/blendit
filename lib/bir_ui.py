@@ -110,18 +110,18 @@ def ensure_blender(cfg, report=None):
 
 
 def require_loaded(doc):
-    """-> (bundle_ref, blend_path) if a model is already loaded (cached) for this
-    document, else show an alert telling the user to Load Model first and return
+    """-> (bundle_ref, blend_path) if a view is already loaded (cached) for this
+    document, else show an alert telling the user to Load View first and return
     (None, None).
 
-    Open Model / Render Loaded Model consume a loaded model; loading (the slow Revit
-    extraction) is the explicit, clearly-labelled Load Model step - nothing else
+    Open View / Render Loaded consume a loaded view; loading (the slow Revit
+    extraction) is the explicit, clearly-labelled Load View step - nothing else
     surprises the user with a long operation."""
     import bir_export
     bundle_ref, blend_path = bir_export.cached_bundle(doc)
     if bundle_ref is not None:
         # Soft staleness check: warn (never block) when the model looks different
-        # from what Load Model extracted - the "why is my new wall missing?" fix.
+        # from what Load View extracted - the "why is my new wall missing?" fix.
         try:
             reason = bir_export.staleness(doc)
         except Exception:
@@ -130,21 +130,21 @@ def require_loaded(doc):
             try:
                 from pyrevit import forms
                 choice = forms.alert(
-                    "The loaded model may be out of date: %s.\n\n"
+                    "The loaded view may be out of date: %s.\n\n"
                     "Use the cached version anyway, or cancel and press "
-                    "'Load Model' to re-extract first." % reason,
-                    title="Blendit - model changed since Load",
-                    options=["Use cached model", "Cancel"])
-                if choice != "Use cached model":
+                    "'Load View' to re-extract first." % reason,
+                    title="Blendit - view changed since Load",
+                    options=["Use cached view", "Cancel"])
+                if choice != "Use cached view":
                     return None, None
             except Exception:
                 pass
         return bundle_ref, blend_path
     try:
         from pyrevit import forms
-        forms.alert("No model is loaded yet.\n\nPress 'Load Model' to extract the "
+        forms.alert("No view is loaded yet.\n\nPress 'Load View' to extract the "
                     "active 3D view first, then try again.",
-                    title="Blendit - no model loaded")
+                    title="Blendit - no view loaded")
     except Exception:
         pass
     return None, None
@@ -176,9 +176,9 @@ def ensure_3d_view(doc, report=None):
     return False
 
 
-def launch_headless_render(cfg, report, banner="Render Loaded Model"):
-    """The Render Loaded Model launch, shared with its Shift+Click 'at Final
-    quality' variant: pre-flight Blender, require a loaded model, then start
+def launch_headless_render(cfg, report, banner="Render Loaded"):
+    """The Render Loaded launch, shared with its Shift+Click 'at Final
+    quality' variant: pre-flight Blender, require a loaded view, then start
     a DETACHED headless render of the cached bundle with cfg's settings as
     CLI overrides (the bundle is a pure geometry cache). Returns True when a
     render was launched."""

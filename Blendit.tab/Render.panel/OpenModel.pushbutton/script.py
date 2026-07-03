@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Open the loaded model in an interactive Blender session (real-time navigation).
+"""Open the loaded view in an interactive Blender session (real-time navigation).
 
-Opens the model you've already loaded (press **Load Model** first). Fly around,
-frame your shot, and render from the 'Blendit' N-panel (press N in Blender) -
-Capture for a quick grab, Render Final for a high-quality one. Reopening is fast:
-it uses the prepared scene cache, so no re-import.
+Opens the view you've already loaded (press **Load View** first). Fly around,
+frame your shot, pose 2D plans / elevations, and render from the 'Blendit' N-panel
+(press N in Blender) - Capture for a quick grab, Render Final for a high-quality one.
+Reopening is fast: it uses the prepared scene cache, so no re-import.
 
-You can't open a model that isn't loaded - if none is, you'll be told to Load first.
+You can't open a view that isn't loaded - if none is, you'll be told to Load first.
 """
-__title__ = "Open\nModel"
+__title__ = "Open\nView"
 __author__ = "Blendit"
 
 import os
@@ -37,16 +37,16 @@ def main():
     # Force EEVEE for a responsive realtime viewport. --save-blend builds/refreshes
     # the fast-open cache; --blend opens it directly when it already exists.
     # Open in White/Clay (fast, robust for composing) - switch to any mode live from
-    # the N-panel. The render-mode config drives Render Loaded Model finals.
+    # the N-panel. The render-mode config drives Render Loaded finals.
     cmd = [blender, "--python", live_py, "--",
            "--bundle", bundle_ref, "--save-blend", blend_path,
            "--capture-dir", cap_dir,
            "--engine", "EEVEE", "--mode", "white"]
     if os.path.isfile(blend_path):
         cmd += ["--blend", blend_path]
-        _report("**Blendit** - opening the loaded model (fast: cached scene)")
+        _report("**Blendit** - opening the loaded view (fast: cached scene)")
     else:
-        _report("**Blendit** - opening the loaded model (first open builds the "
+        _report("**Blendit** - opening the loaded view (first open builds the "
                 "fast-open cache)")
     _report("- launching Blender... Navigate to compose, **Enter** to capture, "
             "**F10** for the full Blender interface.")

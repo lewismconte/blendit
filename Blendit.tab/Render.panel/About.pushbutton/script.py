@@ -18,8 +18,9 @@ _ABOUT_MD = (
     "good-out-of-the-box defaults and **twelve render looks** - photoreal, "
     "clay, shadow study, showroom, and a stylised drawing family: linework, "
     "pen, sketch, cel, hatch, yellowtrace, brown paper, and blueprint - plus "
-    "an interactive **Open Model** session, saved views with batch rendering, "
-    "a 12-look contact sheet, and **SVG / PDF** vector export.\n\n"
+    "an interactive **Open View** session, scale-true **2D plans / elevations / "
+    "sections**, saved views with batch rendering, a 12-look contact sheet, and "
+    "**SVG / PDF** vector export.\n\n"
     "- **Source + docs:** %s\n"
     "- **Portfolio:** %s\n" % (_GITHUB, _PORTFOLIO))
 

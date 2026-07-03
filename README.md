@@ -37,6 +37,9 @@ locking your work in.
 - ☁️ **Atmosphere & weather** — procedural **volumetric clouds** and sky: seven cloud
   types (fair-weather cumulus → overcast → towering storm), a live sun / time-of-day,
   and a 360° storm-ring mode. All procedural — no downloads, no huge sky files.
+- 📐 **2D drawings** — pose scale-true **plans, elevations and sections** (1:50, 1:100,
+  …) sized to real **paper** (A0–A4, Letter, Tabloid) at print DPI, with a section-cut
+  slider. Pair them with the drawing looks and export as PNG or vector.
 - ✏️ **Vector export (SVG / PDF)** — any line style exports as true, editable vector
   paths for Illustrator, Inkscape or CAD — not a pixel image.
 - 🛬 **Compose your shot** — an interactive review session where you fly around, frame
@@ -93,16 +96,20 @@ find one (or you can set it under **Settings**).
 From the **Blendit** ribbon:
 
 1. Open a **3D view** in Revit.
-2. **Load Model** — pulls the active view across (the one slow step, with a progress
+2. **Load View** — pulls the active view across (the one slow step, with a progress
    bar).
 3. Then either:
-   - **Open Model** — opens it in Blender to fly around, compose, tweak the look, and
-     capture your shot, or
-   - **Render Loaded Model** — renders it straight to an image, no fuss.
+   - **Open View** — opens it in Blender to fly around, compose, tweak the look, pose
+     2D plans / elevations / sections, and capture your shot, or
+   - **Render Loaded** — renders it straight to an image, no fuss.
 4. **Open Renders** to find your images.
 
 **Settings** lets you set the Blender path, output folder, default render look, and
 quality. That's the whole workflow.
+
+In **Open View**, the **2D Drawings** panel poses an orthographic plan or elevation,
+sized to a paper sheet at a chosen scale (or fit-to-sheet), with a section-cut slider;
+export it as a PNG, or as SVG / PDF in any of the line looks.
 
 ## Where it's going
 

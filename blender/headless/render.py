@@ -114,12 +114,12 @@ def _failure_hint(tb):
                 "Samples (Quality button) and try again, or switch the "
                 "Engine to EEVEE.")
     if "scene.glb" in low or "no such file" in low or "filenotfounderror" in low:
-        return ("The cached bundle looks incomplete - press Load Model in "
+        return ("The cached bundle looks incomplete - press Load View in "
                 "Revit to re-extract, then render again.")
     if "permission" in low or "access is denied" in low:
         return ("Couldn't write the output - check the Output folder in "
                 "Settings is writable (not read-only / cloud-locked).")
-    return ("Press Load Model in Revit and try again; if it keeps failing, "
+    return ("Press Load View in Revit and try again; if it keeps failing, "
             "check the .log file next to where the image should be.")
 
 

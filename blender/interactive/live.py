@@ -1,6 +1,6 @@
 """Interactive Blender session for Blendit live navigation.
 
-Launched (NOT --background) by the Revit 'Open Model' button:
+Launched (NOT --background) by the Revit 'Open View' button:
 
     blender.exe --python blender/interactive/live.py -- --bundle "<bundle ref>" \
         [--engine EEVEE|CYCLES] [--mode realistic|white|shadow|linework|specular]
@@ -757,6 +757,128 @@ class BIR_BookmarkItem(bpy.types.PropertyGroup):
     res_y: bpy.props.IntProperty(default=1080)
 
 
+# --- 2D drawings (orthographic plans / elevations / sections) ---------------
+# ISO A-series + two US sheets, held PORTRAIT (short edge, long edge) in mm; the
+# orientation toggle swaps them.
+_PAPER_MM = {
+    "A0": (841, 1189), "A1": (594, 841), "A2": (420, 594),
+    "A3": (297, 420), "A4": (210, 297),
+    "LETTER": (216, 279), "TABLOID": (279, 432),
+}
+_PAPER_ITEMS = [
+    ("A0", "A0", "841 x 1189 mm"), ("A1", "A1", "594 x 841 mm"),
+    ("A2", "A2", "420 x 594 mm"), ("A3", "A3", "297 x 420 mm"),
+    ("A4", "A4", "210 x 297 mm"),
+    ("LETTER", "Letter", "216 x 279 mm"), ("TABLOID", "Tabloid", "279 x 432 mm"),
+]
+_ORIENT_ITEMS = [("LANDSCAPE", "Landscape", "Wide sheet"),
+                 ("PORTRAIT", "Portrait", "Tall sheet")]
+# Scale denominator: the ortho frame's world width == paper_width_m x denominator
+# (1:100 on an A1 landscape = 0.841 m x 100 = 84.1 m across the page). FIT ignores
+# scale and just frames the model on the sheet.
+_SCALE_DENOM = {"FIT": 0, "1:20": 20, "1:50": 50, "1:100": 100,
+                "1:200": 200, "1:500": 500, "1:1000": 1000}
+_SCALE_ITEMS = [
+    ("FIT", "Fit to sheet", "Frame the model to fill the sheet (no fixed scale)"),
+    ("1:20", "1:20", "Detail"), ("1:50", "1:50", "Room / section"),
+    ("1:100", "1:100", "Plan / elevation"), ("1:200", "1:200", "Building"),
+    ("1:500", "1:500", "Site"), ("1:1000", "1:1000", "Context"),
+]
+_DPI_ITEMS = [("96", "96 dpi", "Screen"), ("150", "150 dpi", "Draft print"),
+              ("300", "300 dpi", "Print")]
+_DRAW_LABELS = {"plan": "Plan", "ceiling": "Ceiling", "north": "North",
+                "south": "South", "east": "East", "west": "West"}
+_MAX_DRAW_PX = 10000   # cap the long edge so A0 @ 300 dpi stays a finite render
+
+
+def _paper_dims_mm(st):
+    """(width, height) of the sheet in mm, after the orientation toggle."""
+    w, h = _PAPER_MM.get(st.drawing_paper, (297, 420))
+    if st.drawing_orient == "LANDSCAPE":
+        w, h = h, w
+    return w, h
+
+
+def _apply_paper_resolution(st):
+    """Set the render resolution from the sheet size + DPI (clamped to a sane long
+    edge). Returns (res_x, res_y)."""
+    sc = bpy.context.scene
+    w_mm, h_mm = _paper_dims_mm(st)
+    dpi = float(st.drawing_dpi)
+    rx = max(1, int(round(w_mm / 25.4 * dpi)))
+    ry = max(1, int(round(h_mm / 25.4 * dpi)))
+    long_edge = max(rx, ry)
+    if long_edge > _MAX_DRAW_PX:
+        k = _MAX_DRAW_PX / float(long_edge)
+        rx = max(1, int(round(rx * k)))
+        ry = max(1, int(round(ry * k)))
+    sc.render.resolution_x = rx
+    sc.render.resolution_y = ry
+    sc.render.resolution_percentage = 100
+    sc.render.pixel_aspect_x = 1.0
+    sc.render.pixel_aspect_y = 1.0
+    return rx, ry
+
+
+def _pose_drawing(direction, retrace=False):
+    """Pose the export camera as an orthographic drawing looking from `direction`
+    and apply the current sheet / scale / cut settings. Shared by the direction
+    buttons (retrace=True: Line Art is camera-relative, so a new angle must be
+    re-traced) and by a paper/scale change (retrace=False: those only change
+    ortho_scale / resolution, the camera pose is unchanged, so the bake still holds)."""
+    from blender.pipeline import camera as cammod
+    global _SYNCING, _STATUS
+    sc = bpy.context.scene
+    st = getattr(sc, "bir", None)
+    cam = sc.camera
+    if cam is None or st is None:
+        return
+    rx, ry = _apply_paper_resolution(st)
+    aspect = rx / float(ry) if ry else 1.0
+    denom = _SCALE_DENOM.get(st.drawing_scale, 0)
+    w_mm, _h = _paper_dims_mm(st)
+    ortho_scale = (w_mm / 1000.0) * denom if denom else None
+    cammod.frame_ortho_drawing(cam, direction, ortho_scale=ortho_scale, aspect=aspect)
+    cammod.apply_section_cut(cam, st.drawing_cut_depth if st.drawing_cut else 0.0)
+    st.drawing_last = direction
+    _SYNCING = True                       # reflect ORTHO in the View panel without
+    try:                                  # triggering a re-fit that undoes the pose
+        st.projection = "ORTHO"
+    finally:
+        _SYNCING = False
+    if retrace and st.mode in _LINE_MODES:
+        _do_regenerate_lines()            # re-trace + WYSIWYG frame for the new angle
+    else:
+        _enter_frame()
+    kind = "" if direction in ("plan", "ceiling") else " elevation"
+    _STATUS = "Drawing: %s%s (%s)" % (_DRAW_LABELS.get(direction, direction), kind,
+                                      st.drawing_scale)
+    _redraw_all()
+
+
+def _update_drawing_format(self, context):
+    """Paper / orientation / scale / DPI changed: re-fit if a drawing is posed,
+    else just set the resolution."""
+    if _SYNCING:
+        return
+    if self.drawing_last:
+        _pose_drawing(self.drawing_last)
+    else:
+        _apply_paper_resolution(self)
+        _redraw_all()
+
+
+def _update_drawing_cut(self, context):
+    if _SYNCING:
+        return
+    from blender.pipeline import camera as cammod
+    cam = bpy.context.scene.camera
+    if cam is None or cam.data.type != "ORTHO" or not self.drawing_last:
+        return
+    cammod.apply_section_cut(cam, self.drawing_cut_depth if self.drawing_cut else 0.0)
+    _redraw_all()
+
+
 class BIR_Settings(bpy.types.PropertyGroup):
     mode: bpy.props.EnumProperty(name="Mode", items=_MODE_ITEMS,
                                  default="realistic", update=_update_mode)
@@ -913,6 +1035,32 @@ class BIR_Settings(bpy.types.PropertyGroup):
         description="Slide the frame up / down without tilting the camera "
                     "(raises the vantage while keeping verticals vertical)",
         update=_update_camera)
+    # 2D drawings (orthographic plans / elevations / sections).
+    drawing_paper: bpy.props.EnumProperty(
+        name="Paper", items=_PAPER_ITEMS, default="A3",
+        description="Sheet size the drawing is framed and rendered for",
+        update=_update_drawing_format)
+    drawing_orient: bpy.props.EnumProperty(
+        name="Orientation", items=_ORIENT_ITEMS, default="LANDSCAPE",
+        update=_update_drawing_format)
+    drawing_scale: bpy.props.EnumProperty(
+        name="Scale", items=_SCALE_ITEMS, default="1:100",
+        description="Drawing scale: the ortho frame's real-world width is the sheet "
+                    "width x this denominator. Fit ignores scale and fills the sheet",
+        update=_update_drawing_format)
+    drawing_dpi: bpy.props.EnumProperty(
+        name="DPI", items=_DPI_ITEMS, default="150",
+        description="Print resolution: sheet size x DPI sets the pixel dimensions",
+        update=_update_drawing_format)
+    drawing_cut: bpy.props.BoolProperty(
+        name="Section Cut", default=False,
+        description="Slice the model with a cut plane (near clip): turns a plan into "
+                    "a floor plan and an elevation into a section", update=_update_drawing_cut)
+    drawing_cut_depth: bpy.props.FloatProperty(
+        name="Cut Position", default=0.5, min=0.0, max=1.0, subtype="FACTOR",
+        description="Where the cut plane sits, from the near face (0) to the far "
+                    "face (1) along the view", update=_update_drawing_cut)
+    drawing_last: bpy.props.StringProperty(default="", options={"HIDDEN"})
 
 
 # --- materials list (surface overrides) ------------------------------------
@@ -1604,6 +1752,52 @@ class BIR_OT_contact_sheet(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BIR_OT_drawing_pose(bpy.types.Operator):
+    bl_idname = "bir.drawing_pose"
+    bl_label = "Drawing View"
+    bl_description = ("Pose an orthographic plan / elevation, framed on the sheet at "
+                      "the chosen scale (a section cut turns it into a plan / section)")
+    direction: bpy.props.StringProperty(default="plan", options={"HIDDEN"})
+
+    def execute(self, context):
+        if _BUSY or _LOADED is None or context.scene.camera is None:
+            return {"CANCELLED"}
+        direction = self.direction         # bound to the closure below
+        _run_busy("Framing %s" % _DRAW_LABELS.get(direction, direction),
+                  lambda: _pose_drawing(direction, retrace=True))
+        return {"FINISHED"}
+
+
+def _do_export_drawing():
+    global _STATUS
+    st = getattr(bpy.context.scene, "bir", None)
+    _enter_frame()                          # WYSIWYG: export exactly the framed sheet
+    samples = int(st.final_samples) if st is not None else 200
+    label = _DRAW_LABELS.get(st.drawing_last, "drawing") if st is not None else "drawing"
+    scale = (st.drawing_scale if st is not None else "FIT").replace(":", "-")
+    prefix = "%s_%s" % (_safe_name(label), scale)
+    out = _render_still_at(_export_path("drawings", prefix, "png"), samples)
+    _STATUS = "Drawing saved: %s" % os.path.basename(out)
+    if not bpy.app.background:
+        try:
+            os.startfile(out)
+        except Exception:
+            pass
+
+
+class BIR_OT_export_drawing(bpy.types.Operator):
+    bl_idname = "bir.export_drawing"
+    bl_label = "Export Drawing (PNG)"
+    bl_description = ("Render the current sheet to a PNG at the paper size + DPI, "
+                      "saved to /drawings and opened")
+
+    def execute(self, context):
+        if _BUSY or _LOADED is None or context.scene.camera is None:
+            return {"CANCELLED"}
+        _run_busy("Rendering drawing", _do_export_drawing)
+        return {"FINISHED"}
+
+
 class BIR_UL_bookmarks(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data,
                   active_propname, index):
@@ -1854,6 +2048,57 @@ class BIR_PT_framing(_Sub, bpy.types.Panel):
         shift.prop(st, "lens_shift", slider=True)
 
 
+class BIR_PT_drawing(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_main"
+    bl_label = "2D Drawings"
+    bl_options = {"DEFAULT_CLOSED"}
+    bl_order = 5
+
+    def draw(self, context):
+        st = _bir(context)
+        if st is None:
+            return
+        layout = self.layout
+        layout.label(text="Orthographic plan / elevation / section")
+        col = layout.column(align=True)
+        col.label(text="Direction")
+        r = col.row(align=True)
+        r.operator("bir.drawing_pose", text="Plan").direction = "plan"
+        r.operator("bir.drawing_pose", text="Ceiling").direction = "ceiling"
+        r = col.row(align=True)
+        r.operator("bir.drawing_pose", text="North").direction = "north"
+        r.operator("bir.drawing_pose", text="South").direction = "south"
+        r = col.row(align=True)
+        r.operator("bir.drawing_pose", text="East").direction = "east"
+        r.operator("bir.drawing_pose", text="West").direction = "west"
+        if st.drawing_last:
+            name = _DRAW_LABELS.get(st.drawing_last, "-")
+            kind = "" if st.drawing_last in ("plan", "ceiling") else " elevation"
+            layout.label(text="Posed: %s%s" % (name, kind), icon="CHECKMARK")
+        sheet = layout.column(align=True)
+        sheet.prop(st, "drawing_paper", text="")
+        sheet.prop(st, "drawing_orient", text="")
+        sheet.prop(st, "drawing_scale", text="")
+        sheet.prop(st, "drawing_dpi", text="")
+        cut = layout.column(align=True)
+        cut.prop(st, "drawing_cut", toggle=True)
+        sub = cut.row(align=True)
+        sub.enabled = st.drawing_cut
+        sub.prop(st, "drawing_cut_depth", slider=True)
+        sc = context.scene
+        layout.label(text="Sheet: %d x %d px" %
+                     (sc.render.resolution_x, sc.render.resolution_y),
+                     icon="IMAGE_DATA")
+        layout.separator()
+        exp = layout.row(align=True)
+        exp.scale_y = 1.2
+        exp.operator("bir.export_drawing", icon="RENDER_STILL")
+        vec = layout.row(align=True)
+        vec.operator("bir.export_vector", text="SVG").fmt = "svg"
+        vec.operator("bir.export_vector", text="PDF").fmt = "pdf"
+        layout.label(text="SVG / PDF need a line mode (Mode box)", icon="INFO")
+
+
 # --- Atmosphere / Weather (vendored volumetric clouds; see clouds.py) -------
 def _clouds(context):
     return getattr(context.scene, "bir_clouds", None)
@@ -1863,7 +2108,7 @@ class BIR_PT_atmosphere(_Sub, bpy.types.Panel):
     bl_parent_id = "BIR_PT_main"
     bl_label = "Atmosphere / Weather"
     bl_options = {"DEFAULT_CLOSED"}
-    bl_order = 5
+    bl_order = 6
 
     def draw(self, context):
         s = _clouds(context)
@@ -2006,9 +2251,10 @@ _CLASSES = (BIR_MaterialItem, BIR_BookmarkItem, BIR_Settings,
             BIR_OT_export_vector, BIR_OT_toggle_mode, BIR_OT_regenerate_lines,
             BIR_OT_bookmark_add, BIR_OT_bookmark_remove, BIR_OT_bookmark_recall,
             BIR_OT_bookmark_render_all, BIR_OT_contact_sheet,
+            BIR_OT_drawing_pose, BIR_OT_export_drawing,
             BIR_PT_main, BIR_PT_views, BIR_PT_materials, BIR_PT_light,
             BIR_PT_sun, BIR_PT_lines, BIR_PT_lines_adv, BIR_PT_view,
-            BIR_PT_framing) + _ATMO_CLASSES
+            BIR_PT_framing, BIR_PT_drawing) + _ATMO_CLASSES
 
 
 def _register_ui():
