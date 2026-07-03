@@ -89,6 +89,64 @@ def set_ground_tone(value):
                 n.inputs["Base Color"].default_value = (value, value, value, 1.0)
 
 
+def set_ground_finish(value, roughness):
+    """Ground colour + finish in one call (the showroom's dark glossy floor)."""
+    g = bpy.data.objects.get("BIR_Ground")
+    if g is None or not g.data.materials:
+        return
+    m = g.data.materials[0]
+    if m.use_nodes:
+        for n in m.node_tree.nodes:
+            if n.type == "BSDF_PRINCIPLED":
+                n.inputs["Base Color"].default_value = (value, value, value, 1.0)
+                n.inputs["Roughness"].default_value = float(roughness)
+
+
+def set_studio_world(strength=1.0):
+    """A dark studio-gradient environment with a glowing horizon band - the
+    showroom backdrop. Near-black floor and zenith so the scene goes moody;
+    the bright band is what glossy surfaces catch as reflections."""
+    w = bpy.context.scene.world
+    if w is None:
+        w = bpy.data.worlds.new("World")
+        bpy.context.scene.world = w
+    w.use_nodes = True
+    nt = w.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputWorld")
+    out.location = (400, 0)
+    bg = nt.nodes.new("ShaderNodeBackground")
+    bg.location = (200, 0)
+    bg.inputs["Strength"].default_value = float(strength)
+    nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    tc.location = (-600, 0)
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    sep.location = (-420, 0)
+    nt.links.new(tc.outputs["Generated"], sep.inputs["Vector"])
+    # Direction Z (-1..1) -> ramp position (0..1): 0.5 is the horizon.
+    remap = nt.nodes.new("ShaderNodeMath")
+    remap.operation = "MULTIPLY_ADD"
+    remap.location = (-260, 0)
+    remap.inputs[1].default_value = 0.5
+    remap.inputs[2].default_value = 0.5
+    nt.links.new(sep.outputs["Z"], remap.inputs[0])
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.location = (-80, 0)
+    cr = ramp.color_ramp
+    stops = ((0.00, 0.015), (0.42, 0.03), (0.50, 0.75),   # the horizon glow
+             (0.58, 0.07), (1.00, 0.02))
+    els = cr.elements
+    els[0].position, els[0].color = stops[0][0], (stops[0][1],) * 3 + (1.0,)
+    els[1].position, els[1].color = stops[1][0], (stops[1][1],) * 3 + (1.0,)
+    for pos, val in stops[2:]:
+        e = els.new(pos)
+        e.color = (val,) * 3 + (1.0,)
+    nt.links.new(remap.outputs["Value"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], bg.inputs["Color"])
+
+
 def set_sun_softness(degrees):
     """Sun angular size -> shadow softness. 0.5 deg = crisp (real sun); larger =
     softer, diffuse shadows."""

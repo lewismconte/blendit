@@ -190,6 +190,26 @@ def _concrete(nt, bsdf, tint, roughness):
     n.inputs["Roughness"].default_value = 0.6
     nt.links.new(vec, n.inputs["Vector"])
     col = _ramp(nt, n.outputs["Fac"], _shade(tint, 0.82), _shade(tint, 1.08))
+    # Large-scale mottling on top of the fine grain: real concrete reads by its
+    # metre-scale pour/weathering variation, not just the surface noise.
+    try:
+        big = nt.nodes.new("ShaderNodeTexNoise")
+        big.location = (-400, 300)
+        big.inputs["Scale"].default_value = 0.45
+        big.inputs["Detail"].default_value = 2.0
+        nt.links.new(vec, big.inputs["Vector"])
+        mot = _ramp(nt, big.outputs["Fac"], _shade([1, 1, 1], 0.90),
+                    _shade([1, 1, 1], 1.06))
+        mix = nt.nodes.new("ShaderNodeMix")
+        mix.data_type = "RGBA"
+        mix.blend_type = "MULTIPLY"
+        mix.location = (150, 150)
+        mix.inputs[0].default_value = 1.0          # Factor
+        nt.links.new(col, mix.inputs[6])           # A (color)
+        nt.links.new(mot, mix.inputs[7])           # B (color)
+        col = mix.outputs[2]                       # Result (color)
+    except Exception:
+        pass                                       # older Mix node API: skip mottle
     nt.links.new(col, bsdf.inputs["Base Color"])
     bsdf.inputs["Roughness"].default_value = max(roughness, 0.8)
     fine = nt.nodes.new("ShaderNodeTexNoise")
@@ -197,6 +217,57 @@ def _concrete(nt, bsdf, tint, roughness):
     fine.inputs["Scale"].default_value = 35.0
     nt.links.new(vec, fine.inputs["Vector"])
     _bump(nt, bsdf, fine.outputs["Fac"], 0.1)
+
+
+def _plaster(nt, bsdf, tint, roughness):
+    """Smooth painted / rendered wall finish: the flat colour with only a
+    faint fine grain. Plaster reads by its SMOOTHNESS - the old stone/marble
+    veining it used to get was exactly wrong."""
+    bsdf.inputs["Base Color"].default_value = _shade(tint, 1.0)
+    bsdf.inputs["Roughness"].default_value = max(roughness, 0.55)
+    vec = _proj(nt, 1.0)
+    n = nt.nodes.new("ShaderNodeTexNoise")
+    n.location = (-400, -300)
+    n.inputs["Scale"].default_value = 90.0
+    n.inputs["Detail"].default_value = 2.0
+    nt.links.new(vec, n.inputs["Vector"])
+    _bump(nt, bsdf, n.outputs["Fac"], 0.04, distance=0.004)
+
+
+def _asphalt(nt, bsdf, tint, roughness):
+    """Dark rough paving: fine aggregate speckle, very matte. Stays DARK
+    whatever the Revit colour says - light asphalt reads as concrete."""
+    m = max(tint) if max(tint) > 0 else 1.0
+    dark = [c * min(1.0, 0.14 / m) for c in tint]   # clamp brightness, keep hue
+    vec = _proj(nt, 1.0)
+    n = nt.nodes.new("ShaderNodeTexNoise")
+    n.location = (-400, 0)
+    n.inputs["Scale"].default_value = 300.0          # aggregate speckle
+    n.inputs["Detail"].default_value = 3.0
+    nt.links.new(vec, n.inputs["Vector"])
+    col = _ramp(nt, n.outputs["Fac"], _shade(dark, 0.7), _shade(dark, 1.35))
+    nt.links.new(col, bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = max(roughness, 0.92)
+    _bump(nt, bsdf, n.outputs["Fac"], 0.15, distance=0.003)
+
+
+def _water(nt, bsdf, tint, roughness):
+    """Water: physical transmission + a rippled surface normal. Full effect
+    in Cycles; EEVEE shows a glossy rippled surface (no per-material
+    refraction flags on this opaque-record path)."""
+    bsdf.inputs["Base Color"].default_value = _shade(tint, 1.0)
+    bsdf.inputs["Roughness"].default_value = 0.03
+    bsdf.inputs["IOR"].default_value = 1.33
+    if "Transmission Weight" in bsdf.inputs:
+        bsdf.inputs["Transmission Weight"].default_value = 0.9
+    vec = _proj(nt, 1.0)
+    ripple = nt.nodes.new("ShaderNodeTexNoise")
+    ripple.location = (-400, -300)
+    ripple.inputs["Scale"].default_value = 5.0
+    ripple.inputs["Detail"].default_value = 4.0
+    ripple.inputs["Distortion"].default_value = 0.4
+    nt.links.new(vec, ripple.inputs["Vector"])
+    _bump(nt, bsdf, ripple.outputs["Fac"], 0.3, distance=0.015)
 
 
 def _stone(nt, bsdf, tint, roughness):
@@ -251,20 +322,28 @@ def _grass(nt, bsdf, tint, roughness):
     _bump(nt, bsdf, n.outputs["Fac"], 0.2)
 
 
-# First keyword hit wins, so order matters (brick before the generic "masonry").
+# First keyword hit wins, so order matters (brick before the generic "masonry";
+# "waterproof" must stop BEFORE "water" matches; metal before "paint" so a
+# painted-metal name stays metal). A `None` builder is a STOP entry: matched
+# names keep the plain flat colour.
 _LIBRARY = [
     (("brick",), _brick),
     (("wood", "timber", "oak", "ply", "lumber", "mdf", "laminate", "veneer",
       "bamboo", "parquet"), _wood),
+    (("waterproof", "membrane", "damp proof", "vapour", "vapor"), None),
+    (("water", "pool", "pond", "lake", "fountain"), _water),
+    (("asphalt", "bitumen", "tarmac", "paving", "pavement", "road"), _asphalt),
     (("concrete", "cast-in", "cast in", "screed", "cement", "cmu", "precast"),
      _concrete),
     (("metal", "steel", "alum", "copper", "brass", "bronze", "iron", "chrome",
       "zinc", "tin", "stainless", "metallic"), _metal),
     (("carpet", "fabric", "textile", "rug", "upholstery", "cloth", "felt",
       "acoustic"), _fabric),
+    (("plaster", "stucco", "gypsum", "drywall", "plasterboard", "paint",
+      "render"), _plaster),
     (("grass", "turf", "lawn", "vegetation", "planting"), _grass),
-    (("stone", "marble", "granite", "stucco", "plaster", "masonry", "tile",
-      "ceramic", "porcelain", "terrazzo", "slate", "render"), _stone),
+    (("stone", "marble", "granite", "masonry", "tile", "ceramic", "porcelain",
+      "terrazzo", "slate"), _stone),
 ]
 
 
@@ -272,14 +351,16 @@ _LIBRARY = [
 # match) and "plain" (flat colour) are handled by materials.build_material, not here.
 SURFACES = {
     "brick": _brick, "wood": _wood, "concrete": _concrete, "stone": _stone,
-    "metal": _metal, "fabric": _fabric, "grass": _grass,
+    "metal": _metal, "fabric": _fabric, "grass": _grass, "plaster": _plaster,
+    "asphalt": _asphalt, "water": _water,
 }
 
 # (key, label) pairs — the single source of truth for the override menu.
 CHOICES = [
     ("brick", "Brick"), ("wood", "Wood"), ("concrete", "Concrete"),
-    ("stone", "Stone / Tile"), ("metal", "Metal"), ("fabric", "Fabric / Carpet"),
-    ("grass", "Grass"),
+    ("plaster", "Plaster / Paint"), ("stone", "Stone / Tile"),
+    ("metal", "Metal"), ("fabric", "Fabric / Carpet"), ("grass", "Grass"),
+    ("asphalt", "Asphalt / Paving"), ("water", "Water"),
 ]
 
 
@@ -301,6 +382,8 @@ def category_for(name):
     for keys, builder in _LIBRARY:
         for k in keys:
             if k in low:
+                if builder is None:            # explicit stop: stays flat
+                    return None
                 return builder.__name__.lstrip("_")
     return None
 
@@ -315,6 +398,8 @@ def decorate(nt, bsdf, name, tint, roughness):
     for keys, builder in _LIBRARY:
         for k in keys:
             if k in low:
+                if builder is None:            # explicit stop: stays flat
+                    return None
                 builder(nt, bsdf, list(tint), float(roughness))
                 return builder.__name__.lstrip("_")
     return None

@@ -118,6 +118,13 @@ def _noise_mod(gp):
     return None
 
 
+def _length_mod(gp):
+    for m in gp.modifiers:
+        if m.type == "GREASE_PENCIL_LENGTH":
+            return m
+    return None
+
+
 def _set_line_color(gp, color):
     for mat in gp.data.materials:
         if mat is not None and mat.grease_pencil is not None:
@@ -403,6 +410,54 @@ def set_sketchiness(amount):
             nz.noise_scale = 0.4
         except Exception:
             pass
+
+
+def set_line_overshoot(amount):
+    """Extend every stroke past its endpoints by ~`amount` metres - the
+    hand-drawn habit of overdrawing lines through corners (the classic
+    architectural-sketch tell). Randomised per stroke so no two corners
+    overshoot identically; straight extensions (curvature off) like a ruler
+    stroke that didn't stop in time. 0 removes the modifier."""
+    gp = bpy.data.objects.get(_GP_NAME)
+    if gp is None:
+        return
+    ln = _length_mod(gp)
+    if amount <= 0.0:
+        if ln is not None:
+            try:
+                gp.modifiers.remove(ln)
+            except Exception:
+                pass
+        return
+    if ln is None:
+        try:
+            ln = gp.modifiers.new("Overshoot", "GREASE_PENCIL_LENGTH")
+        except Exception:
+            return
+    for attr, val in (("mode", "ABSOLUTE"),
+                      ("use_curvature", False),
+                      ("start_length", float(amount)),
+                      ("end_length", float(amount)),
+                      ("use_random", True),
+                      ("random_start_factor", float(amount) * 0.7),
+                      ("random_end_factor", float(amount) * 0.7),
+                      ("seed", 7)):
+        try:
+            setattr(ln, attr, val)
+        except Exception:
+            pass
+
+
+def get_line_overshoot():
+    gp = bpy.data.objects.get(_GP_NAME)
+    if gp is not None:
+        ln = _length_mod(gp)
+        if ln is not None:
+            try:
+                return float(ln.start_length)
+            except Exception:
+                return None
+    return None
 
 
 # --- toon (cel) shading -----------------------------------------------------

@@ -445,6 +445,13 @@ def _update_sketch(self, context):
     npr.set_sketchiness(self.sketch_amount)
 
 
+def _update_sketch_overshoot(self, context):
+    if _SYNCING:
+        return
+    from blender.pipeline import npr
+    npr.set_line_overshoot(self.sketch_overshoot)
+
+
 def _update_cel_shades(self, context):
     if _SYNCING or _LOADED is None:
         return
@@ -681,11 +688,14 @@ _SURFACE_ITEMS = [
     ("plain", "Plain colour", "Flat Revit colour, no texture"),
     ("brick", "Brick", "Brick coursing (triplanar)"),
     ("wood", "Wood", "Wood grain"),
-    ("concrete", "Concrete", "Cast concrete"),
+    ("concrete", "Concrete", "Cast concrete (grain + pour mottling)"),
+    ("plaster", "Plaster / Paint", "Smooth painted / rendered finish"),
     ("stone", "Stone / Tile", "Stone / marble / tile veining"),
     ("metal", "Metal", "Brushed metal"),
     ("fabric", "Fabric / Carpet", "Woven fabric / carpet"),
     ("grass", "Grass", "Grass / turf"),
+    ("asphalt", "Asphalt / Paving", "Dark rough paving"),
+    ("water", "Water", "Rippled water (best in Cycles)"),
 ]
 
 
@@ -808,6 +818,11 @@ class BIR_Settings(bpy.types.PropertyGroup):
     sketch_amount: bpy.props.FloatProperty(name="Sketchiness", default=0.3,
                                            min=0.0, max=2.0,
                                            update=_update_sketch)
+    sketch_overshoot: bpy.props.FloatProperty(
+        name="Overshoot", default=0.12, min=0.0, max=0.6, precision=2,
+        description="Overdraw lines past their corners (metres) - the "
+                    "hand-drawn architectural-sketch habit. 0 = clean stops",
+        update=_update_sketch_overshoot)
     cel_shades: bpy.props.IntProperty(name="Shades", default=3, min=2, max=6,
                                       update=_update_cel_shades)
     hatch_density: bpy.props.FloatProperty(
@@ -1751,6 +1766,7 @@ class BIR_PT_lines(_Sub, bpy.types.Panel):
         layout.prop(st, "line_color", text="")           # live colour
         if st.mode == "sketch":
             layout.prop(st, "sketch_amount", slider=True)
+            layout.prop(st, "sketch_overshoot", slider=True)
         if st.mode == "cel":
             layout.prop(st, "cel_shades", slider=True)
         if st.mode == "hatch":
