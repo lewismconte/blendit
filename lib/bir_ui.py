@@ -176,6 +176,66 @@ def ensure_3d_view(doc, report=None):
     return False
 
 
+def launch_headless_render(cfg, report, banner="Render Loaded Model"):
+    """The Render Loaded Model launch, shared with its Shift+Click 'at Final
+    quality' variant: pre-flight Blender, require a loaded model, then start
+    a DETACHED headless render of the cached bundle with cfg's settings as
+    CLI overrides (the bundle is a pure geometry cache). Returns True when a
+    render was launched."""
+    import os
+    import subprocess
+    import bir_bootstrap
+    from bir_contract.transport import stamped_name
+
+    blender = ensure_blender(cfg, report)
+    if not blender:
+        return False
+    doc = active_doc()
+    bundle_ref, _blend = require_loaded(doc)    # error popup if not loaded
+    if bundle_ref is None:
+        return False
+
+    res = cfg.get("resolution", [1600, 900])
+    report("**Blendit - %s**  \n"
+           "mode **%s** | engine **%s** | %sx%s | %s samples%s"
+           % (banner, cfg.get("mode"), cfg.get("engine"), res[0], res[1],
+              cfg.get("samples"), " | denoise" if cfg.get("denoise") else ""))
+
+    out_dir = cfg.get("output_dir") or bir_bootstrap.default_output_dir()
+    if not os.path.isdir(out_dir):
+        try:
+            os.makedirs(out_dir)
+        except Exception:
+            pass
+    png = os.path.join(out_dir, stamped_name("render", "png"))
+    # Log shares the PNG's stamp: concurrent renders never fight over one file.
+    log_path = os.path.splitext(png)[0] + ".log"
+    render_py = bir_bootstrap.render_script_path()
+    # --open: Blender opens the PNG itself when done, so Revit isn't blocked.
+    cmd = [blender, "--background", "--python", render_py, "--",
+           "--bundle", bundle_ref, "--out", png, "--open",
+           "--mode", str(cfg.get("mode") or "realistic"),
+           "--engine", str(cfg.get("engine") or "EEVEE"),
+           "--samples", str(cfg.get("samples") or 64),
+           "--resolution", str(res[0]), str(res[1]),
+           "--denoise", "on" if cfg.get("denoise") else "off"]
+    try:
+        logf = open(log_path, "wb")
+        try:
+            subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
+        finally:
+            logf.close()      # the child holds its own handle; don't leak ours
+    except OSError as ex:
+        report("**ERROR** launching Blender: %s\n\n"
+               "Set the Blender path in Settings (or BLENDIT_BLENDER_EXE)." % ex)
+        return False
+
+    report("- rendering in the background (this can take a while for a large "
+           "model) - **Revit is free to use.** The image opens when it's done."
+           "\n- output: `%s`\n- log (if it fails): `%s`" % (png, log_path))
+    return True
+
+
 def set_mode(key):
     """Set the render mode (shared by the Mode buttons). Deliberately
     popup-free: picking a mode is a one-click action, not a dialog
