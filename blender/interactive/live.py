@@ -28,6 +28,7 @@ Blender preferences are not modified.
     Capture  Enter / Numpad-Enter    Regen lines  L    Fly / Build  F10
 """
 import argparse
+import json
 import os
 import sys
 
@@ -702,6 +703,42 @@ class BIR_MaterialItem(bpy.types.PropertyGroup):
                                     default="auto", update=_update_material_surface)
 
 
+def _update_bookmark_meta(self, context):
+    """Rename / per-view mode edits persist straight to the sidecar."""
+    if _SYNCING:
+        return
+    _save_bookmarks()
+
+
+_BOOKMARK_MODE_ITEMS = ([("current", "Current mode",
+                          "Render this view in whatever mode is active")]
+                        + [(k, l, d) for k, l, d in _MODE_ITEMS])
+
+
+class BIR_BookmarkItem(bpy.types.PropertyGroup):
+    """One saved view: a name, the full camera state, and an optional per-view
+    render mode (so View 1 can be realistic and View 2 pen in one batch)."""
+    label: bpy.props.StringProperty(name="Name", default="View",
+                                    update=_update_bookmark_meta)
+    mode: bpy.props.EnumProperty(name="Mode", items=_BOOKMARK_MODE_ITEMS,
+                                 default="current", update=_update_bookmark_meta)
+    matrix: bpy.props.FloatVectorProperty(size=16,
+                                          default=(1.0, 0.0, 0.0, 0.0,
+                                                   0.0, 1.0, 0.0, 0.0,
+                                                   0.0, 0.0, 1.0, 0.0,
+                                                   0.0, 0.0, 0.0, 1.0))
+    cam_type: bpy.props.StringProperty(default="PERSP")
+    projection: bpy.props.StringProperty(default="PERSP")
+    lens: bpy.props.FloatProperty(default=50.0)
+    ortho_scale: bpy.props.FloatProperty(default=10.0)
+    shift_x: bpy.props.FloatProperty(default=0.0)
+    shift_y: bpy.props.FloatProperty(default=0.0)
+    clip_start: bpy.props.FloatProperty(default=0.05)
+    clip_end: bpy.props.FloatProperty(default=100000.0)
+    res_x: bpy.props.IntProperty(default=1920)
+    res_y: bpy.props.IntProperty(default=1080)
+
+
 class BIR_Settings(bpy.types.PropertyGroup):
     mode: bpy.props.EnumProperty(name="Mode", items=_MODE_ITEMS,
                                  default="realistic", update=_update_mode)
@@ -805,6 +842,9 @@ class BIR_Settings(bpy.types.PropertyGroup):
     # Per-material surface overrides (the Materials list).
     material_overrides: bpy.props.CollectionProperty(type=BIR_MaterialItem)
     material_index: bpy.props.IntProperty(default=0)
+    # Saved views (camera bookmarks).
+    bookmarks: bpy.props.CollectionProperty(type=BIR_BookmarkItem)
+    bookmark_index: bpy.props.IntProperty(default=0)
     # View (always available)
     frame_view: bpy.props.BoolProperty(
         name="Frame View", default=False,
@@ -935,6 +975,325 @@ def _init_materials():
             _apply_material_override(it)
 
 
+# --- saved views (camera bookmarks) ------------------------------------------
+# The Enscape-Views workflow: save composed shots, recall them, batch-render
+# them all at Final quality. Bookmarks persist as a sidecar JSON next to the
+# bundle (same pattern as material_overrides.json) so they survive the .blend
+# cache AND a model re-Load - the cameras are world-space, so re-extracted
+# geometry lands back under the same saved shots.
+_BOOKMARKS_FILENAME = "bookmarks.json"
+
+_BOOKMARK_FIELDS = ("label", "mode", "cam_type", "projection", "lens",
+                    "ortho_scale", "shift_x", "shift_y", "clip_start",
+                    "clip_end", "res_x", "res_y")
+
+
+def _bookmarks_path():
+    return (os.path.join(_OVERRIDE_DIR, _BOOKMARKS_FILENAME)
+            if _OVERRIDE_DIR else None)
+
+
+def _save_bookmarks():
+    st = getattr(bpy.context.scene, "bir", None)
+    path = _bookmarks_path()
+    if st is None or not path:
+        return
+    data = []
+    for it in st.bookmarks:
+        rec = dict((f, getattr(it, f)) for f in _BOOKMARK_FIELDS)
+        rec["matrix"] = list(it.matrix)
+        data.append(rec)
+    try:
+        with open(path, "w") as f:
+            json.dump({"bookmarks": data}, f, indent=2)
+    except Exception:
+        pass
+
+
+def _load_bookmarks():
+    """Sidecar JSON -> the panel's bookmark list (on session start)."""
+    global _SYNCING
+    st = getattr(bpy.context.scene, "bir", None)
+    path = _bookmarks_path()
+    if st is None or not path or not os.path.isfile(path):
+        return
+    try:
+        with open(path) as f:
+            data = (json.load(f) or {}).get("bookmarks", [])
+    except Exception:
+        return
+    _SYNCING = True
+    try:
+        st.bookmarks.clear()
+        for rec in data:
+            it = st.bookmarks.add()
+            for f in _BOOKMARK_FIELDS:
+                if rec.get(f) is not None:
+                    try:
+                        setattr(it, f, rec[f])
+                    except Exception:
+                        pass
+            m = rec.get("matrix")
+            if m and len(m) == 16:
+                it.matrix = m
+        st.bookmark_index = 0
+    finally:
+        _SYNCING = False
+
+
+def _bookmark_from_camera(bm):
+    """Store the current camera + frame into a bookmark item."""
+    sc = bpy.context.scene
+    cam = sc.camera
+    st = getattr(sc, "bir", None)
+    try:
+        bpy.context.view_layer.update()   # matrix_world is lazy
+    except Exception:
+        pass
+    flat = []
+    for row in cam.matrix_world:
+        flat.extend((row[0], row[1], row[2], row[3]))
+    bm.matrix = flat
+    bm.cam_type = cam.data.type
+    bm.lens = cam.data.lens
+    bm.ortho_scale = cam.data.ortho_scale
+    bm.shift_x = cam.data.shift_x
+    bm.shift_y = cam.data.shift_y
+    bm.clip_start = cam.data.clip_start
+    bm.clip_end = cam.data.clip_end
+    bm.res_x = sc.render.resolution_x
+    bm.res_y = sc.render.resolution_y
+    bm.projection = st.projection if st is not None else "PERSP"
+
+
+def _apply_bookmark(bm):
+    """Restore camera + frame from a bookmark (data API only - timer-safe)."""
+    global _SYNCING
+    import mathutils
+    sc = bpy.context.scene
+    cam = sc.camera
+    m = bm.matrix
+    cam.matrix_world = mathutils.Matrix((m[0:4], m[4:8], m[8:12], m[12:16]))
+    cam.data.type = bm.cam_type or "PERSP"
+    if bm.lens > 0:
+        cam.data.lens = bm.lens
+    cam.data.ortho_scale = bm.ortho_scale
+    cam.data.shift_x = bm.shift_x
+    cam.data.shift_y = bm.shift_y
+    cam.data.clip_start = bm.clip_start
+    cam.data.clip_end = bm.clip_end
+    if bm.res_x > 0 and bm.res_y > 0:
+        sc.render.resolution_x = bm.res_x
+        sc.render.resolution_y = bm.res_y
+    st = getattr(sc, "bir", None)
+    if st is not None and bm.projection:
+        _SYNCING = True
+        try:
+            st.projection = bm.projection
+        finally:
+            _SYNCING = False
+    try:
+        bpy.context.view_layer.update()
+    except Exception:
+        pass
+
+
+def _camera_state():
+    """Snapshot the camera + frame (plain Python) so batch operations can put
+    the user's composition back exactly as they left it."""
+    sc = bpy.context.scene
+    cam = sc.camera
+    return {"matrix": cam.matrix_world.copy(), "type": cam.data.type,
+            "lens": cam.data.lens, "ortho": cam.data.ortho_scale,
+            "sx": cam.data.shift_x, "sy": cam.data.shift_y,
+            "res": (sc.render.resolution_x, sc.render.resolution_y)}
+
+
+def _restore_camera_state(s):
+    sc = bpy.context.scene
+    cam = sc.camera
+    cam.matrix_world = s["matrix"]
+    cam.data.type = s["type"]
+    cam.data.lens = s["lens"]
+    cam.data.ortho_scale = s["ortho"]
+    cam.data.shift_x = s["sx"]
+    cam.data.shift_y = s["sy"]
+    sc.render.resolution_x, sc.render.resolution_y = s["res"]
+    try:
+        bpy.context.view_layer.update()
+    except Exception:
+        pass
+
+
+def _current_mode():
+    if _SPEC is None:
+        return "realistic"
+    return str(_SPEC.get("render", {}).get("mode", "realistic"))
+
+
+def _safe_name(label):
+    s = "".join(c if (c.isalnum() or c in "-_ ") else "_" for c in str(label))
+    return s.strip().replace(" ", "_")[:40]
+
+
+def _run_busy_chain(make_steps):
+    """Drive a generator of banner labels one stage per timer tick (the
+    _deferred_build pattern, generalized): the WORKING banner repaints with
+    each stage name before that stage blocks. No stage here loads files, so a
+    plain (non-persistent) timer is safe."""
+    global _BUSY, _BUSY_LABEL
+    gen = make_steps()
+    _BUSY = True
+
+    def _tick():
+        global _BUSY, _BUSY_LABEL, _STATUS
+        try:
+            label = next(gen)
+        except StopIteration:
+            _BUSY = False
+            _BUSY_LABEL = ""
+            _redraw_all()
+            return None
+        except Exception as ex:
+            _STATUS = "Failed: %s" % ex
+            import traceback
+            traceback.print_exc()
+            _BUSY = False
+            _BUSY_LABEL = ""
+            _redraw_all()
+            return None
+        _BUSY_LABEL = label
+        _redraw_all()
+        return 0.05
+
+    try:
+        bpy.app.timers.register(_tick, first_interval=0.05)
+    except Exception:
+        while _tick() is not None:
+            pass
+
+
+def _batch_steps():
+    """One saved view per tick: apply its camera, ensure its mode (re-tracing
+    Line Art for the new camera when needed), render at Final quality. The
+    user's own camera + mode come back exactly as they were, then the finals
+    folder opens."""
+    global _STATUS
+    sc = bpy.context.scene
+    st = sc.bir
+    total = len(st.bookmarks)
+    keep = _camera_state()
+    keep_mode = _current_mode()
+    samples = int(st.final_samples)
+    done = []
+    for i in range(total):
+        bm = st.bookmarks[i]
+        yield "Rendering view %d of %d - %s" % (i + 1, total, bm.label)
+        _apply_bookmark(bm)
+        mode = keep_mode if bm.mode == "current" else bm.mode
+        if _current_mode() != mode:
+            _apply_mode(mode)          # bakes Line Art for this camera too
+        elif mode in _LINE_MODES:
+            from blender.pipeline import npr
+            npr.unbake_line_art()      # same mode, NEW camera: re-trace
+            npr.refresh_line_art()
+            npr.bake_line_art()
+        # setup_engine (inside _apply_mode) resets the resolution from the
+        # spec - re-assert this view's own frame right before rendering.
+        if bm.res_x > 0 and bm.res_y > 0:
+            sc.render.resolution_x, sc.render.resolution_y = bm.res_x, bm.res_y
+        out = _export_path("finals", _safe_name(bm.label) or "view", "png")
+        done.append(_render_still_at(out, samples))
+    yield "Restoring your view"
+    if _current_mode() != keep_mode:
+        _apply_mode(keep_mode)
+    _restore_camera_state(keep)
+    _enter_frame()
+    _STATUS = "Rendered %d saved view(s) -> finals" % len(done)
+    if done and not bpy.app.background:
+        try:
+            os.startfile(os.path.dirname(done[-1]))
+        except Exception:
+            pass
+
+
+# --- contact sheet ------------------------------------------------------------
+_SHEET_COLS = 3
+_SHEET_CELL_LONG = 480   # cell long edge in px (9 cells -> ~1.5k sheet)
+
+
+def _stitch_grid(paths, cols, out_path, pad=6):
+    """Stitch same-sized PNGs into one grid image (numpy via bpy - no PIL).
+    paths[0] lands top-left (image pixel origin is bottom-left, so rows flip)."""
+    import numpy as np
+    cells = []
+    for p in paths:
+        im = bpy.data.images.load(p)
+        w, h = im.size
+        buf = np.empty(w * h * 4, dtype=np.float32)
+        im.pixels.foreach_get(buf)
+        cells.append(buf.reshape(h, w, 4))
+        bpy.data.images.remove(im)
+    ch, cw = cells[0].shape[:2]
+    rows = (len(cells) + cols - 1) // cols
+    width = cols * cw + pad * (cols + 1)
+    height = rows * ch + pad * (rows + 1)
+    sheet = np.full((height, width, 4), 1.0, dtype=np.float32)  # white gutters
+    for i, cell in enumerate(cells):
+        r, c = divmod(i, cols)
+        x = pad + c * (cw + pad)
+        y = height - (pad + (r + 1) * ch + r * pad)
+        sheet[y:y + ch, x:x + cw, :] = cell[:ch, :cw, :]
+    img = bpy.data.images.new("BIR_ContactSheet", width=width, height=height)
+    img.pixels.foreach_set(sheet.ravel())
+    img.filepath_raw = out_path
+    img.file_format = "PNG"
+    img.save()
+    bpy.data.images.remove(img)
+    return out_path
+
+
+def _contact_steps():
+    """Render the CURRENT shot small in every mode, one mode per tick, then
+    stitch the nine cells into a single grid PNG - 'which look should this
+    be?' answered in one image."""
+    global _STATUS
+    import tempfile
+    sc = bpy.context.scene
+    keep = _camera_state()
+    keep_mode = _current_mode()
+    rx, ry = keep["res"]
+    if rx >= ry:
+        cw = _SHEET_CELL_LONG
+        ch = max(1, int(round(_SHEET_CELL_LONG * ry / float(rx))))
+    else:
+        ch = _SHEET_CELL_LONG
+        cw = max(1, int(round(_SHEET_CELL_LONG * rx / float(ry))))
+    tmp = tempfile.mkdtemp(prefix="blendit_sheet_")
+    cells = []
+    for i, (key, label, _desc) in enumerate(_MODE_ITEMS):
+        yield "Contact sheet %d of %d - %s" % (i + 1, len(_MODE_ITEMS), label)
+        if _current_mode() != key:
+            _apply_mode(key)
+        # setup_engine resets resolution from the spec - small cells win.
+        sc.render.resolution_x, sc.render.resolution_y = cw, ch
+        cells.append(_render_still_at(
+            os.path.join(tmp, "%02d_%s.png" % (i, key)), 48))
+    yield "Stitching the sheet"
+    out = _export_path("sheets", "contact_sheet", "png")
+    _stitch_grid(cells, _SHEET_COLS, out)
+    if _current_mode() != keep_mode:
+        _apply_mode(keep_mode)
+    _restore_camera_state(keep)
+    _enter_frame()
+    _STATUS = "Contact sheet saved: %s" % os.path.basename(out)
+    if not bpy.app.background:
+        try:
+            os.startfile(out)
+        except Exception:
+            pass
+
+
 # --- operators --------------------------------------------------------------
 # ORDERING RULE for every capture-ish operator: snap the camera SYNCHRONOUSLY
 # in execute() (real UI context, the exact viewport the user acted in), then
@@ -1013,14 +1372,13 @@ class BIR_OT_regenerate_lines(bpy.types.Operator):
         return {"FINISHED"}
 
 
-def _do_render_final():
-    # Render the CURRENT composed view at high quality, so a shot framed in Live
-    # View can be finalized in-session (no round-trip to Revit). Lit modes go to
-    # Cycles; NPR (Line Art / toon) stays EEVEE since that's where it renders.
+def _render_still_at(out, samples):
+    """Render the current scene to `out` at `samples`: Cycles for lit modes,
+    EEVEE for NPR (that's where Line Art / toon render), engine + sample
+    counts restored afterwards. Shared by Render Final, the Saved Views
+    batch, and the contact sheet."""
     sc = bpy.context.scene
     st = getattr(sc, "bir", None)
-    _enter_frame()          # camera was snapped in the operator's execute
-    samples = int(st.final_samples) if st is not None else 200
     npr_mode = bool(st is not None and st.mode in _LINE_MODES)
     prev_engine = sc.render.engine
     try:                                    # final samples are final-only: remember
@@ -1031,12 +1389,11 @@ def _do_render_final():
     from blender.pipeline.engine import _eevee_engine_id
     if npr_mode:
         sc.render.engine = _eevee_engine_id()
-        sc.eevee.taa_render_samples = samples
+        sc.eevee.taa_render_samples = int(samples)
     else:
         sc.render.engine = "CYCLES"
-        sc.cycles.samples = samples
+        sc.cycles.samples = int(samples)
         sc.cycles.use_denoising = True
-    out = _next_final_path()
     sc.render.image_settings.file_format = "PNG"
     sc.render.filepath = out
     bpy.ops.render.render(write_still=True)
@@ -1048,6 +1405,16 @@ def _do_render_final():
             sc.cycles.samples = prev_cycles_samples
     except Exception:
         pass
+    return out
+
+
+def _do_render_final():
+    # Render the CURRENT composed view at high quality, so a shot framed in Live
+    # View can be finalized in-session (no round-trip to Revit).
+    st = getattr(bpy.context.scene, "bir", None)
+    _enter_frame()          # camera was snapped in the operator's execute
+    samples = int(st.final_samples) if st is not None else 200
+    out = _render_still_at(_next_final_path(), samples)
     global _STATUS
     _STATUS = "Final saved: %s" % os.path.basename(out)
     try:
@@ -1123,6 +1490,108 @@ class BIR_OT_export_vector(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BIR_OT_bookmark_add(bpy.types.Operator):
+    bl_idname = "bir.bookmark_add"
+    bl_label = "Save View"
+    bl_description = ("Save the current shot as a named view (camera, frame "
+                      "and an optional per-view mode)")
+
+    def execute(self, context):
+        st = _bir(context)
+        if st is None or context.scene.camera is None:
+            return {"CANCELLED"}
+        global _SYNCING, _STATUS
+        _snap_camera_to_view(context)      # save what the user SEES
+        it = st.bookmarks.add()
+        _SYNCING = True
+        try:
+            it.label = "View %d" % len(st.bookmarks)
+            _bookmark_from_camera(it)
+        finally:
+            _SYNCING = False
+        st.bookmark_index = len(st.bookmarks) - 1
+        _save_bookmarks()
+        _STATUS = "Saved view: %s (rename it in the list)" % it.label
+        return {"FINISHED"}
+
+
+class BIR_OT_bookmark_remove(bpy.types.Operator):
+    bl_idname = "bir.bookmark_remove"
+    bl_label = "Remove View"
+    bl_description = "Remove the selected saved view"
+
+    def execute(self, context):
+        st = _bir(context)
+        if st is None or not (0 <= st.bookmark_index < len(st.bookmarks)):
+            return {"CANCELLED"}
+        st.bookmarks.remove(st.bookmark_index)
+        st.bookmark_index = min(st.bookmark_index, len(st.bookmarks) - 1)
+        _save_bookmarks()
+        return {"FINISHED"}
+
+
+class BIR_OT_bookmark_recall(bpy.types.Operator):
+    bl_idname = "bir.bookmark_recall"
+    bl_label = "Go to View"
+    bl_description = ("Jump to the selected saved view (camera, frame, and "
+                      "its mode if one is set)")
+
+    def execute(self, context):
+        st = _bir(context)
+        if st is None or not (0 <= st.bookmark_index < len(st.bookmarks)) \
+                or context.scene.camera is None:
+            return {"CANCELLED"}
+        bm = st.bookmarks[st.bookmark_index]
+        _apply_bookmark(bm)
+        _enter_frame()                     # look through the restored camera
+        if bm.mode != "current" and _current_mode() != bm.mode:
+            mode = bm.mode
+            _run_busy("Switching to %s" % mode, lambda: _apply_mode(mode))
+        global _STATUS
+        _STATUS = "View: %s" % bm.label
+        return {"FINISHED"}
+
+
+class BIR_OT_bookmark_render_all(bpy.types.Operator):
+    bl_idname = "bir.bookmark_render_all"
+    bl_label = "Render All Views (Final)"
+    bl_description = ("Render every saved view at Final quality - each with "
+                      "its own mode - then open the finals folder. Your "
+                      "current camera and mode come back untouched")
+
+    def execute(self, context):
+        st = _bir(context)
+        if _BUSY or st is None or not len(st.bookmarks) \
+                or context.scene.camera is None:
+            return {"CANCELLED"}
+        _run_busy_chain(_batch_steps)
+        return {"FINISHED"}
+
+
+class BIR_OT_contact_sheet(bpy.types.Operator):
+    bl_idname = "bir.contact_sheet"
+    bl_label = "Contact Sheet"
+    bl_description = ("Render THIS shot in all nine looks as one grid image - "
+                      "pick a style (or send options) from a single PNG")
+
+    def execute(self, context):
+        if _BUSY or _LOADED is None or context.scene.camera is None:
+            return {"CANCELLED"}
+        _snap_camera_to_view(context)      # the sheet shows THIS shot
+        _run_busy_chain(_contact_steps)
+        return {"FINISHED"}
+
+
+class BIR_UL_bookmarks(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data,
+                  active_propname, index):
+        row = layout.row(align=True)
+        row.prop(item, "label", text="", emboss=False, icon="CAMERA_DATA")
+        sub = row.row(align=True)
+        sub.scale_x = 0.95
+        sub.prop(item, "mode", text="")
+
+
 def _bir(context):
     return getattr(context.scene, "bir", None)
 
@@ -1150,6 +1619,8 @@ class BIR_PT_main(bpy.types.Panel):
         col.operator("bir.render_image", text="Capture", icon="RENDER_STILL")
         col.operator("bir.render_final", text="Render Final", icon="RENDER_STILL")
         col.scale_y = 1.0
+        col.operator("bir.contact_sheet", text="Contact Sheet (9 looks)",
+                     icon="IMGDISPLAY")
         row = col.row(align=True)
         row.operator("bir.open_captures", text="Open Captures", icon="FILE_FOLDER")
         row.operator("bir.toggle_mode",
@@ -1168,11 +1639,36 @@ class BIR_PT_main(bpy.types.Panel):
         box.prop(st, "final_samples")          # Render Final quality (all modes)
 
 
+class BIR_PT_views(_Sub, bpy.types.Panel):
+    bl_parent_id = "BIR_PT_main"
+    bl_label = "Saved Views"
+    bl_order = 0
+
+    def draw(self, context):
+        st = _bir(context)
+        if st is None:
+            return
+        layout = self.layout
+        if not len(st.bookmarks):
+            layout.label(text="Frame a shot, press +", icon="INFO")
+        row = layout.row()
+        row.template_list("BIR_UL_bookmarks", "", st, "bookmarks",
+                          st, "bookmark_index", rows=3)
+        side = row.column(align=True)
+        side.operator("bir.bookmark_add", text="", icon="ADD")
+        side.operator("bir.bookmark_remove", text="", icon="REMOVE")
+        if len(st.bookmarks):
+            go = layout.row(align=True)
+            go.scale_y = 1.2
+            go.operator("bir.bookmark_recall", icon="VIEW_CAMERA")
+            layout.operator("bir.bookmark_render_all", icon="RENDER_ANIMATION")
+
+
 class BIR_PT_materials(_Sub, bpy.types.Panel):
     bl_parent_id = "BIR_PT_main"
     bl_label = "Materials"
     bl_options = {"DEFAULT_CLOSED"}
-    bl_order = 0
+    bl_order = 1
 
     @classmethod
     def poll(cls, context):
@@ -1191,7 +1687,7 @@ class BIR_PT_materials(_Sub, bpy.types.Panel):
 class BIR_PT_light(_Sub, bpy.types.Panel):
     bl_parent_id = "BIR_PT_main"
     bl_label = "Light"
-    bl_order = 1
+    bl_order = 2
 
     @classmethod
     def poll(cls, context):
@@ -1241,7 +1737,7 @@ class BIR_PT_sun(_Sub, bpy.types.Panel):
 class BIR_PT_lines(_Sub, bpy.types.Panel):
     bl_parent_id = "BIR_PT_main"
     bl_label = "Lines"
-    bl_order = 2
+    bl_order = 3
 
     @classmethod
     def poll(cls, context):
@@ -1301,7 +1797,7 @@ class BIR_PT_view(_Sub, bpy.types.Panel):
     bl_parent_id = "BIR_PT_main"
     bl_label = "View"
     bl_options = {"DEFAULT_CLOSED"}
-    bl_order = 3
+    bl_order = 4
 
     def draw(self, context):
         st = _bir(context)
@@ -1344,7 +1840,7 @@ class BIR_PT_atmosphere(_Sub, bpy.types.Panel):
     bl_parent_id = "BIR_PT_main"
     bl_label = "Atmosphere / Weather"
     bl_options = {"DEFAULT_CLOSED"}
-    bl_order = 4
+    bl_order = 5
 
     def draw(self, context):
         s = _clouds(context)
@@ -1481,11 +1977,15 @@ _ATMO_CLASSES = (BIR_PT_atmosphere, BIR_PT_atmo_shape, BIR_PT_atmo_detail,
                  BIR_PT_atmo_domain, BIR_PT_atmo_sky, BIR_PT_atmo_anim,
                  BIR_PT_atmo_render)
 
-_CLASSES = (BIR_MaterialItem, BIR_Settings, BIR_UL_materials,
+_CLASSES = (BIR_MaterialItem, BIR_BookmarkItem, BIR_Settings,
+            BIR_UL_materials, BIR_UL_bookmarks,
             BIR_OT_render_image, BIR_OT_render_final, BIR_OT_open_captures,
             BIR_OT_export_vector, BIR_OT_toggle_mode, BIR_OT_regenerate_lines,
-            BIR_PT_main, BIR_PT_materials, BIR_PT_light, BIR_PT_sun,
-            BIR_PT_lines, BIR_PT_lines_adv, BIR_PT_view, BIR_PT_framing) + _ATMO_CLASSES
+            BIR_OT_bookmark_add, BIR_OT_bookmark_remove, BIR_OT_bookmark_recall,
+            BIR_OT_bookmark_render_all, BIR_OT_contact_sheet,
+            BIR_PT_main, BIR_PT_views, BIR_PT_materials, BIR_PT_light,
+            BIR_PT_sun, BIR_PT_lines, BIR_PT_lines_adv, BIR_PT_view,
+            BIR_PT_framing) + _ATMO_CLASSES
 
 
 def _register_ui():
@@ -1977,6 +2477,7 @@ def _build_steps():
     _init_sun()                              # seed + apply the Revit-style sun once
     _init_camera_panel()                     # reflect the built camera into the View panel
     _init_materials()                        # build the Materials list + apply saved overrides
+    _load_bookmarks()                        # saved views from the sidecar JSON
     _register_hud()                          # ensure the HUD survived open_mainfile
 
 
