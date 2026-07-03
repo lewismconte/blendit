@@ -32,6 +32,9 @@ class RenderMode(str, Enum):
     SKETCH = "sketch"         # NPR hand-drawn sketch
     CEL = "cel"               # NPR anime cel shading
     HATCH = "hatch"           # NPR tonal shadow hatching
+    YELLOWTRACE = "yellowtrace"  # NPR loose sketch on yellow trace paper
+    KRAFT = "kraft"           # NPR black ink + white accents on brown paper
+    BLUEPRINT = "blueprint"   # NPR white line work on cyanotype blue
 
 
 # Canonical list of every render mode -- the SINGLE SOURCE OF TRUTH for the set of

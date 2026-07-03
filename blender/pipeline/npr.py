@@ -16,6 +16,43 @@ _LINE_MAT = "BIR_Line"
 
 
 # --- flat fill / world / ground (for the pen + sketch "paper" look) --------
+def make_two_tone_material(shade_color, lit_color, threshold=0.5,
+                           name="BIR_TwoTone"):
+    """A hard lit/shade split fill: faces toward the light take `lit_color`,
+    everything else melts into `shade_color`. Pair the shade with the paper
+    colour for accent looks (white pencil on kraft). EEVEE-only
+    (Shader-to-RGB), like the toon materials."""
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    out.location = (600, 0)
+    diff = nt.nodes.new("ShaderNodeBsdfDiffuse")
+    diff.location = (-300, 0)
+    diff.inputs["Color"].default_value = (0.8, 0.8, 0.8, 1.0)
+    s2 = nt.nodes.new("ShaderNodeShaderToRGB")
+    s2.location = (-100, 0)
+    nt.links.new(diff.outputs["BSDF"], s2.inputs["Shader"])
+    bw = nt.nodes.new("ShaderNodeRGBToBW")
+    bw.location = (60, 0)
+    nt.links.new(s2.outputs["Color"], bw.inputs["Color"])
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.location = (220, 0)
+    cr = ramp.color_ramp
+    cr.interpolation = "CONSTANT"
+    cr.elements[0].position = 0.0
+    cr.elements[0].color = (shade_color[0], shade_color[1], shade_color[2], 1.0)
+    cr.elements[1].position = float(threshold)
+    cr.elements[1].color = (lit_color[0], lit_color[1], lit_color[2], 1.0)
+    nt.links.new(bw.outputs["Val"], ramp.inputs["Fac"])
+    emi = nt.nodes.new("ShaderNodeEmission")
+    emi.location = (430, 0)
+    nt.links.new(ramp.outputs["Color"], emi.inputs["Color"])
+    nt.links.new(emi.outputs["Emission"], out.inputs["Surface"])
+    return mat
+
+
 def make_flat_material(color=(0.95, 0.95, 0.95), name="BIR_Flat"):
     """A shadeless flat fill (emission) - no gradients, like ink on paper."""
     mat = bpy.data.materials.new(name)
@@ -125,14 +162,27 @@ def _length_mod(gp):
     return None
 
 
+def _style_line_mat(mat, color):
+    gpstyle = mat.grease_pencil
+    gpstyle.color = (color[0], color[1], color[2], 1.0)
+    # The Line Art default material ships with show_stroke OFF - strokes then
+    # render with a dark fallback and every colour we set was invisible (only
+    # noticed when Blueprint asked for WHITE lines). Assert the flags.
+    try:
+        gpstyle.show_stroke = True
+        gpstyle.show_fill = False
+    except Exception:
+        pass
+
+
 def _set_line_color(gp, color):
     for mat in gp.data.materials:
         if mat is not None and mat.grease_pencil is not None:
-            mat.grease_pencil.color = (color[0], color[1], color[2], 1.0)
+            _style_line_mat(mat, color)
             return
     mat = bpy.data.materials.new(_LINE_MAT)
     bpy.data.materials.create_gpencil_data(mat)
-    mat.grease_pencil.color = (color[0], color[1], color[2], 1.0)
+    _style_line_mat(mat, color)
     gp.data.materials.append(mat)
 
 
@@ -156,6 +206,20 @@ def setup_line_art(radius=0.05, color=(0.0, 0.0, 0.0), crease_deg=70.0,
         return None
     gp.name = _GP_NAME
     gp.data.name = _GP_NAME
+    # Strokes are INK, not surfaces: GPv3 layers default to 'use lights',
+    # which multiplies the stroke colour by the scene lighting - white lines
+    # on a dark world rendered nearly black (found by Blueprint mode; it also
+    # muted every Line Color slider pick under a dim world).
+    try:
+        if hasattr(gp, "use_grease_pencil_lights"):
+            gp.use_grease_pencil_lights = False
+    except Exception:
+        pass
+    for lay in gp.data.layers:
+        try:
+            lay.use_lights = False
+        except Exception:
+            pass
     _set_line_color(gp, color)
 
     m = _lineart_mod(gp)

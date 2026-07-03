@@ -109,8 +109,8 @@ def export_vector(out_path, fmt="svg", use_fill=True):
     if fmt not in VALID_FORMATS:
         raise RuntimeError("Unknown vector format %r (use svg or pdf)." % fmt)
     if not has_line_art():
-        raise RuntimeError("No line work to export - switch to a line mode "
-                           "(Linework / Pen / Sketch / Cel / Hatch) first.")
+        raise RuntimeError("No line work to export - switch to one of the "
+                           "line modes first (Linework, Pen, Sketch, ...).")
     if bpy.context.scene.camera is None:
         raise RuntimeError("No camera to project the drawing through.")
 

@@ -93,7 +93,8 @@ def _parse_args():
     p.add_argument("--engine", choices=["CYCLES", "EEVEE"])
     p.add_argument("--mode",
                    choices=["realistic", "white", "shadow", "specular",
-                            "linework", "pen", "sketch", "cel", "hatch"])
+                            "linework", "pen", "sketch", "cel", "hatch",
+                            "yellowtrace", "kraft", "blueprint"])
     return p.parse_args(args)
 
 
@@ -685,10 +686,14 @@ _MODE_ITEMS = [
     ("sketch", "Sketch", "Hand-drawn wobbly lines on paper"),
     ("cel", "Cel / Anime", "Toon shading + outline"),
     ("hatch", "Hatch", "Tonal shadow hatching (perspective-correct lines)"),
+    ("yellowtrace", "Yellowtrace", "Loose sketch on yellow trace paper"),
+    ("kraft", "Brown Paper", "Black ink + white accents on kraft paper"),
+    ("blueprint", "Blueprint", "White line work on cyanotype blue"),
 ]
 
 _LIT_MODES = ("realistic", "white", "shadow", "specular")
-_LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch")
+_LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch", "yellowtrace",
+               "kraft", "blueprint")
 # Modes where real materials (and therefore textures) are visible. White/Shadow are
 # clay overrides; the NPR modes are line / flat. Kept in sync with material_library.
 _TEXTURED_MODES = ("realistic", "specular")
@@ -1474,8 +1479,7 @@ def _do_export_vector(fmt):
     global _STATUS
     from blender.pipeline import vector_export
     if not vector_export.has_line_art():
-        _STATUS = ("Vector export needs a line mode "
-                   "(Linework / Pen / Sketch / Cel / Hatch).")
+        _STATUS = "Vector export needs one of the line modes first."
         return
     _enter_frame()                       # WYSIWYG: the export frame == what you see
     out = _next_vector_path(fmt)
@@ -1767,7 +1771,7 @@ class BIR_PT_lines(_Sub, bpy.types.Panel):
         layout = self.layout
         layout.prop(st, "line_thickness", slider=True)   # outline weight (live)
         layout.prop(st, "line_color", text="")           # live colour
-        if st.mode == "sketch":
+        if st.mode in ("sketch", "yellowtrace"):
             layout.prop(st, "sketch_amount", slider=True)
             layout.prop(st, "sketch_overshoot", slider=True)
         if st.mode == "cel":

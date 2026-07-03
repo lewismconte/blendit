@@ -30,8 +30,9 @@ locking your work in.
 ## What you get
 
 - 🎨 **Render looks for every purpose** — photoreal, white-card / clay massing, a
-  sun-accurate shadow study, and hand-drawn styles: **linework, pen, sketch, cel, and
-  hatch**. Pick one on the ribbon; switch live in the review session.
+  sun-accurate shadow study, and hand-drawn styles: **linework, pen, sketch, cel,
+  hatch, yellowtrace, brown paper, and blueprint**. Pick one on the ribbon; switch
+  live in the review session.
 - ☁️ **Atmosphere & weather** — procedural **volumetric clouds** and sky: seven cloud
   types (fair-weather cumulus → overcast → towering storm), a live sun / time-of-day,
   and a 360° storm-ring mode. All procedural — no downloads, no huge sky files.
@@ -150,7 +151,8 @@ blender --background --python blender/headless/render.py -- ^
 ```
 
 `MODE`: `realistic`, `white`, `shadow`, `specular`, `linework`, `pen`, `sketch`,
-`cel`, `hatch`. All modes at once: `blender --background --python tests/smoke_render.py`.
+`cel`, `hatch`, `yellowtrace`, `kraft`, `blueprint`. All modes at once:
+`blender --background --python tests/smoke_render.py`.
 
 Verified on Blender 5.0 / 5.1; Blender 4.2 LTS is the intended floor (API differences
 are handled at runtime, but treat 4.2 as best-effort until re-verified).

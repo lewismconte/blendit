@@ -350,6 +350,8 @@ MODE_BUTTON_TEXT = {
     "realistic": "Realistic", "white": "White", "shadow": "Shadow",
     "specular": "Specular", "linework": "Linework", "pen": "Pen",
     "sketch": "Sketch", "cel": "Cel", "hatch": "Hatch",
+    "yellowtrace": "Yellowtrace", "kraft": "Brown Paper",
+    "blueprint": "Blueprint",
 }
 
 _TOOLTIPS_DONE = [False]

@@ -31,7 +31,8 @@ def _parse_args():
     p.add_argument("--engine", choices=["CYCLES", "EEVEE"])
     p.add_argument("--mode",
                    choices=["realistic", "white", "shadow", "linework", "specular",
-                            "pen", "sketch", "cel", "hatch"])
+                            "pen", "sketch", "cel", "hatch", "yellowtrace",
+                            "kraft", "blueprint"])
     p.add_argument("--samples", type=int)
     p.add_argument("--resolution", nargs=2, type=int, metavar=("W", "H"),
                    help="override the output resolution")
@@ -49,7 +50,8 @@ def _parse_args():
     return p.parse_args(args)
 
 
-_LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch")
+_LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch", "yellowtrace",
+               "kraft", "blueprint")
 
 
 def _fmt_duration(seconds):

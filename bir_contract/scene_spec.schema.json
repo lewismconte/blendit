@@ -132,7 +132,7 @@
       "type": "object",
       "required": ["mode", "engine"],
       "properties": {
-        "mode": { "type": "string", "enum": ["realistic", "white", "shadow", "linework", "specular", "pen", "sketch", "cel", "hatch"] },
+        "mode": { "type": "string", "enum": ["realistic", "white", "shadow", "linework", "specular", "pen", "sketch", "cel", "hatch", "yellowtrace", "kraft", "blueprint"] },
         "engine": { "type": "string", "enum": ["CYCLES", "EEVEE"] },
         "resolution": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
         "samples": { "type": "integer" },

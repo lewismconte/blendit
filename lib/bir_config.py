@@ -22,11 +22,14 @@ _DEFAULTS = {
 # Must list every contract render mode: tests/test_contract.py locks this against
 # scene_spec.RENDER_MODES so the Revit UI can't silently miss a mode again.
 MODES = ["realistic", "white", "shadow", "specular",
-         "linework", "pen", "sketch", "cel", "hatch"]
+         "linework", "pen", "sketch", "cel", "hatch",
+         "yellowtrace", "kraft", "blueprint"]
 MODE_LABELS = {
     "realistic": "Realistic", "white": "White / Clay", "shadow": "Shadow study",
     "specular": "Specular", "linework": "Linework", "pen": "Pen",
     "sketch": "Sketch", "cel": "Cel / Anime", "hatch": "Hatch",
+    "yellowtrace": "Yellowtrace", "kraft": "Brown Paper",
+    "blueprint": "Blueprint",
 }
 RESOLUTIONS = [("720p", [1280, 720]), ("1080p", [1920, 1080]),
                ("1440p", [2560, 1440]), ("4K", [3840, 2160])]
