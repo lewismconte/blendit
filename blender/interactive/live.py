@@ -69,6 +69,15 @@ def _repo_root():
     return os.path.abspath(os.path.join(here, "..", ".."))
 
 
+# The launcher runs this file directly (blender --python live.py), so nothing
+# has put the repo root on sys.path yet when MODULE-LEVEL imports below run -
+# main() is too late for those. NOTE: the headless tests pre-insert the root
+# before importing this module, so they can NOT catch a regression here; smoke
+# the real launch path after touching any top-level import.
+if _repo_root() not in sys.path:
+    sys.path.insert(0, _repo_root())
+
+
 def _parse_args():
     argv = sys.argv
     args = argv[argv.index("--") + 1:] if "--" in argv else []
