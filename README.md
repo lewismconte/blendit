@@ -29,10 +29,11 @@ locking your work in.
 
 ## What you get
 
-- 🎨 **Render looks for every purpose** — photoreal, white-card / clay massing, a
-  sun-accurate shadow study, and hand-drawn styles: **linework, pen, sketch, cel,
-  hatch, yellowtrace, brown paper, and blueprint**. Pick one on the ribbon; switch
-  live in the review session.
+- 🎨 **Twelve render looks** — photoreal, white-card / clay massing, a sun-accurate
+  shadow study, a dark showroom, and a stylised drawing family: **linework, pen,
+  sketch, cel, hatch, yellowtrace, brown paper, and blueprint**. Pick one on the
+  ribbon (hover for a preview); switch live in the review session — or render a
+  **contact sheet** of your shot in all twelve at once.
 - ☁️ **Atmosphere & weather** — procedural **volumetric clouds** and sky: seven cloud
   types (fair-weather cumulus → overcast → towering storm), a live sun / time-of-day,
   and a 360° storm-ring mode. All procedural — no downloads, no huge sky files.
@@ -43,6 +44,22 @@ locking your work in.
   light, and snap a capture — all without touching Revit again.
 - ⚡ **Fast and repeatable** — the model is cached, so opening it again is instant, and
   it's tuned to stay quick even on big, detailed models.
+
+## The twelve looks
+
+Every mode, one click apart (the built-in demo scene — hover any Mode button in
+Revit for the same previews):
+
+| | | |
+|:---:|:---:|:---:|
+| ![Realistic](media/modes/realistic.png) | ![White / Clay](media/modes/white.png) | ![Shadow study](media/modes/shadow.png) |
+| **Realistic** | **White / Clay** | **Shadow study** |
+| ![Specular](media/modes/specular.png) | ![Linework](media/modes/linework.png) | ![Pen](media/modes/pen.png) |
+| **Specular (showroom)** | **Linework** | **Pen** |
+| ![Sketch](media/modes/sketch.png) | ![Cel](media/modes/cel.png) | ![Hatch](media/modes/hatch.png) |
+| **Sketch** | **Cel / Anime** | **Hatch** |
+| ![Yellowtrace](media/modes/yellowtrace.png) | ![Brown Paper](media/modes/kraft.png) | ![Blueprint](media/modes/blueprint.png) |
+| **Yellowtrace** | **Brown Paper** | **Blueprint** |
 
 ## Requirements
 

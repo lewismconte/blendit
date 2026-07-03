@@ -7,7 +7,7 @@ layout:
   - OpenModel          # open the loaded model in interactive Blender
   - RenderLoadedModel  # headless render the loaded model as-is
   - "---"
-  - Mode               # render mode (8 looks)
+  - Mode               # render mode (12 looks)
   - Quality            # effort preset (engine + samples + denoise)
   - Resolution         # output size
   - Engine             # Cycles / EEVEE toggle

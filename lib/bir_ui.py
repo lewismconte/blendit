@@ -392,7 +392,7 @@ def set_ribbon_tooltip_image(text, image_path):
             return False
         import Autodesk.Windows as adw
         from System import Uri
-        from System.Windows.Media.Imaging import BitmapImage
+        from System.Windows.Media.Imaging import BitmapImage, BitmapCacheOption
         item = find_ribbon_item(text)
         if item is None:
             return False
@@ -403,7 +403,19 @@ def set_ribbon_tooltip_image(text, image_path):
             if tip:
                 new_tip.Content = str(tip)
             tip = new_tip
-        tip.ExpandedImage = BitmapImage(Uri(image_path))
+        # OnLoad is LOAD-BEARING: the default (lazy) BitmapImage keeps the PNG's
+        # file handle open for the ribbon's lifetime, LOCKING the preview files
+        # against regeneration for as long as Revit runs. Load now, release.
+        img = BitmapImage()
+        img.BeginInit()
+        img.UriSource = Uri(image_path)
+        img.CacheOption = BitmapCacheOption.OnLoad
+        img.EndInit()
+        try:
+            img.Freeze()
+        except Exception:
+            pass
+        tip.ExpandedImage = img
         item.ToolTip = tip
         return True
     except Exception:
