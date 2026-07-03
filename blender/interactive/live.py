@@ -683,20 +683,14 @@ _LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch")
 # Modes where real materials (and therefore textures) are visible. White/Shadow are
 # clay overrides; the NPR modes are line / flat. Kept in sync with material_library.
 _TEXTURED_MODES = ("realistic", "specular")
-_SURFACE_ITEMS = [
+# Derived from the library's CHOICES so the menu can never drift from the
+# surfaces that actually exist (the same single-source rule as render modes).
+from blender.pipeline.material_library import CHOICES as _LIB_CHOICES  # noqa: E402
+
+_SURFACE_ITEMS = ([
     ("auto", "Auto (by name)", "Match a surface from the Revit material name"),
     ("plain", "Plain colour", "Flat Revit colour, no texture"),
-    ("brick", "Brick", "Brick coursing (triplanar)"),
-    ("wood", "Wood", "Wood grain"),
-    ("concrete", "Concrete", "Cast concrete (grain + pour mottling)"),
-    ("plaster", "Plaster / Paint", "Smooth painted / rendered finish"),
-    ("stone", "Stone / Tile", "Stone / marble / tile veining"),
-    ("metal", "Metal", "Brushed metal"),
-    ("fabric", "Fabric / Carpet", "Woven fabric / carpet"),
-    ("grass", "Grass", "Grass / turf"),
-    ("asphalt", "Asphalt / Paving", "Dark rough paving"),
-    ("water", "Water", "Rippled water (best in Cycles)"),
-]
+] + [(key, label, label) for key, label in _LIB_CHOICES])
 
 
 def _update_material_surface(self, context):

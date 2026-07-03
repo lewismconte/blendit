@@ -65,28 +65,13 @@ def _ramp(nt, fac_socket, lo_color, hi_color):
 
 
 # --- surface builders: (nt, bsdf, tint_rgb, roughness) ----------------------
-def _brick_node(nt, tint, vec, loc):
-    """One Brick texture (the 2-D pattern) fed a real-world-scaled vector."""
-    b = nt.nodes.new("ShaderNodeTexBrick")
-    b.location = loc
-    b.inputs["Scale"].default_value = 1.0
-    b.inputs["Brick Width"].default_value = 0.215      # metres (real brick)
-    b.inputs["Row Height"].default_value = 0.065
-    b.inputs["Mortar Size"].default_value = 0.006
-    b.inputs["Mortar Smooth"].default_value = 0.1
-    b.inputs["Color1"].default_value = _shade(tint, 1.0)
-    b.inputs["Color2"].default_value = _shade(tint, 0.72)
-    b.inputs["Mortar"].default_value = (0.05, 0.05, 0.05, 1.0)
-    b.offset_frequency = 2
-    nt.links.new(vec, b.inputs["Vector"])
-    return b
-
-
-def _brick(nt, bsdf, tint, roughness):
-    """Brick is the one 2-D texture in the library (the Brick node only uses X,Y),
-    so a plain projection collapses to a stripe on vertical walls. Triplanar-project
-    it: brick the XY / XZ / YZ planes and blend by |true normal|, so it reads
-    correctly on a wall facing any direction and on floors - no UVs, no image."""
+def _triplanar_color(nt, build2d):
+    """Project a 2-D pattern onto the three world planes and blend by the face
+    normal, so coursed/gridded surfaces (brick, tile, planks, roof courses)
+    read correctly on floors AND on walls facing any direction - no UVs, no
+    images. `build2d(vec_socket, loc)` must return a COLOR output socket.
+    Returns (blended_color_socket, world_mapping_vector) - the vector is for
+    callers' 3-D bump noise."""
     tc = nt.nodes.new("ShaderNodeTexCoord")
     tc.location = (-1100, 0)
     mp = nt.nodes.new("ShaderNodeMapping")
@@ -107,9 +92,9 @@ def _brick(nt, bsdf, tint, roughness):
     vz = _combine(sep.outputs["X"], sep.outputs["Y"], 300)   # floor  (normal ~ Z)
     vy = _combine(sep.outputs["X"], sep.outputs["Z"], 0)     # wall facing Y
     vx = _combine(sep.outputs["Y"], sep.outputs["Z"], -300)  # wall facing X
-    bz = _brick_node(nt, tint, vz, (-450, 300))
-    by = _brick_node(nt, tint, vy, (-450, 0))
-    bx = _brick_node(nt, tint, vx, (-450, -300))
+    cz = build2d(vz, (-450, 300))
+    cy = build2d(vy, (-450, 0))
+    cx = build2d(vx, (-450, -300))
 
     # blend weights = normalized |true normal|
     geo = nt.nodes.new("ShaderNodeNewGeometry")
@@ -135,7 +120,7 @@ def _brick(nt, bsdf, tint, roughness):
     wy = _math("DIVIDE", ay, summ, y=-520)
     wz = _math("DIVIDE", az, summ, y=-590)
 
-    def _scale(color, w, y):
+    def _scale_col(color, w, y):
         m = nt.nodes.new("ShaderNodeVectorMath")
         m.operation = "SCALE"
         m.location = (-200, y)
@@ -151,18 +136,190 @@ def _brick(nt, bsdf, tint, roughness):
         nt.links.new(b, m.inputs[1])
         return m.outputs["Vector"]
 
-    blended = _vadd(_vadd(_scale(bx.outputs["Color"], wx, -300),
-                          _scale(by.outputs["Color"], wy, 0), -150),
-                    _scale(bz.outputs["Color"], wz, 300), 0)
-    nt.links.new(blended, bsdf.inputs["Base Color"])
-    bsdf.inputs["Roughness"].default_value = max(roughness, 0.85)
+    blended = _vadd(_vadd(_scale_col(cx, wx, -300),
+                          _scale_col(cy, wy, 0), -150),
+                    _scale_col(cz, wz, 300), 0)
+    return blended, mp.outputs["Vector"]
 
+
+def _weathered(nt, col, vec, lo=0.86, hi=1.08, scale=0.4):
+    """Multiply metre-scale weathering/variation patches onto a colour socket
+    (real walls are never one uniform tone). Returns the new socket; falls
+    back to the input untouched on older Mix-node APIs."""
+    try:
+        big = nt.nodes.new("ShaderNodeTexNoise")
+        big.location = (-450, 620)
+        big.inputs["Scale"].default_value = float(scale)
+        big.inputs["Detail"].default_value = 2.0
+        nt.links.new(vec, big.inputs["Vector"])
+        mot = _ramp(nt, big.outputs["Fac"], _shade([1, 1, 1], lo),
+                    _shade([1, 1, 1], hi))
+        mix = nt.nodes.new("ShaderNodeMix")
+        mix.data_type = "RGBA"
+        mix.blend_type = "MULTIPLY"
+        mix.location = (150, 320)
+        mix.inputs[0].default_value = 1.0          # Factor
+        nt.links.new(col, mix.inputs[6])           # A (color)
+        nt.links.new(mot, mix.inputs[7])           # B (color)
+        return mix.outputs[2]                      # Result (color)
+    except Exception:
+        return col
+
+
+def _brick_node(nt, tint, vec, loc, width=0.215, height=0.065, mortar=0.006,
+                mortar_col=(0.55, 0.53, 0.50, 1.0), offset=0.5, shade2=0.72):
+    """One Brick texture (the 2-D coursing pattern) fed a metre-scaled vector."""
+    b = nt.nodes.new("ShaderNodeTexBrick")
+    b.location = loc
+    b.inputs["Scale"].default_value = 1.0
+    b.inputs["Brick Width"].default_value = float(width)
+    b.inputs["Row Height"].default_value = float(height)
+    b.inputs["Mortar Size"].default_value = float(mortar)
+    b.inputs["Mortar Smooth"].default_value = 0.1
+    b.inputs["Color1"].default_value = _shade(tint, 1.0)
+    b.inputs["Color2"].default_value = _shade(tint, shade2)
+    b.inputs["Mortar"].default_value = mortar_col
+    b.offset = float(offset)
+    b.offset_frequency = 2
+    nt.links.new(vec, b.inputs["Vector"])
+    return b
+
+
+def _brick(nt, bsdf, tint, roughness):
+    """Brick coursing, triplanar. Light mortar (real mortar is pale - the old
+    near-black joints read as cartoon brick) + metre-scale weathering patches."""
+    col, vec = _triplanar_color(
+        nt, lambda v, loc: _brick_node(nt, tint, v, loc).outputs["Color"])
+    col = _weathered(nt, col, vec, 0.82, 1.06)
+    nt.links.new(col, bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = max(roughness, 0.85)
     # subtle orientation-independent relief (3-D noise, so no projection issue)
     nb = nt.nodes.new("ShaderNodeTexNoise")
     nb.location = (-450, 500)
     nb.inputs["Scale"].default_value = 40.0
-    nt.links.new(mp.outputs["Vector"], nb.inputs["Vector"])
+    nt.links.new(vec, nb.inputs["Vector"])
     _bump(nt, bsdf, nb.outputs["Fac"], 0.12)
+
+
+def _tile(nt, bsdf, tint, roughness):
+    """Glazed ceramic tile: a square grout grid (brick node, zero offset),
+    slight tile-to-tile shade variation, smooth glossy finish."""
+    col, vec = _triplanar_color(
+        nt, lambda v, loc: _brick_node(
+            nt, tint, v, loc, width=0.3, height=0.3, mortar=0.004,
+            mortar_col=(0.62, 0.61, 0.58, 1.0), offset=0.0,
+            shade2=0.93).outputs["Color"])
+    nt.links.new(col, bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = min(max(roughness, 0.15), 0.3)
+    fine = nt.nodes.new("ShaderNodeTexNoise")
+    fine.location = (-450, 500)
+    fine.inputs["Scale"].default_value = 25.0
+    nt.links.new(vec, fine.inputs["Vector"])
+    _bump(nt, bsdf, fine.outputs["Fac"], 0.03, distance=0.003)
+
+
+def _roof_tile(nt, bsdf, tint, roughness):
+    """Roof tiles: offset courses (colour) + horizontal course relief. The bump
+    is a world-Z banded wave, so courses stay horizontal on any roof slope."""
+    col, vec = _triplanar_color(
+        nt, lambda v, loc: _brick_node(
+            nt, tint, v, loc, width=0.32, height=0.34, mortar=0.014,
+            mortar_col=(0.06, 0.05, 0.05, 1.0), shade2=0.8).outputs["Color"])
+    col = _weathered(nt, col, vec, 0.8, 1.08)
+    nt.links.new(col, bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = max(roughness, 0.75)
+    wave = nt.nodes.new("ShaderNodeTexWave")
+    wave.location = (-450, 500)
+    wave.wave_type = "BANDS"
+    wave.bands_direction = "Z"
+    wave.inputs["Scale"].default_value = 2.2       # ~0.34 m course pitch
+    nt.links.new(vec, wave.inputs["Vector"])
+    _bump(nt, bsdf, wave.outputs["Fac"], 0.35, distance=0.012)
+
+
+def _planks(nt, bsdf, tint, roughness):
+    """Wood planks / decking / floorboards: staggered board seams with
+    board-to-board shade variation, wood grain running through, satin finish."""
+    col, vec = _triplanar_color(
+        nt, lambda v, loc: _brick_node(
+            nt, tint, v, loc, width=2.4, height=0.135, mortar=0.005,
+            mortar_col=(0.04, 0.03, 0.02, 1.0), shade2=0.8).outputs["Color"])
+    # grain over the boards
+    try:
+        wave = nt.nodes.new("ShaderNodeTexWave")
+        wave.location = (-450, 620)
+        wave.wave_type = "BANDS"
+        wave.bands_direction = "X"
+        wave.inputs["Scale"].default_value = 2.0
+        wave.inputs["Distortion"].default_value = 9.0
+        wave.inputs["Detail"].default_value = 2.0
+        nt.links.new(vec, wave.inputs["Vector"])
+        grain = _ramp(nt, wave.outputs["Fac"], _shade([1, 1, 1], 0.86),
+                      _shade([1, 1, 1], 1.06))
+        mix = nt.nodes.new("ShaderNodeMix")
+        mix.data_type = "RGBA"
+        mix.blend_type = "MULTIPLY"
+        mix.location = (150, 320)
+        mix.inputs[0].default_value = 1.0
+        nt.links.new(col, mix.inputs[6])
+        nt.links.new(grain, mix.inputs[7])
+        col = mix.outputs[2]
+        _bump(nt, bsdf, wave.outputs["Fac"], 0.08, distance=0.004)
+    except Exception:
+        pass
+    nt.links.new(col, bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = min(max(roughness, 0.3), 0.5)
+
+
+def _corrugated(nt, bsdf, tint, roughness):
+    """Corrugated / profiled metal sheeting (Colorbond and friends): metal with
+    a sine rib relief. Two wave directions blended by usage keeps ribs present
+    on walls facing any way (one wave alone goes flat on its own axis)."""
+    bsdf.inputs["Base Color"].default_value = _shade(tint, 1.0)
+    bsdf.inputs["Metallic"].default_value = 1.0
+    bsdf.inputs["Roughness"].default_value = min(max(roughness, 0.3), 0.5)
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    tc.location = (-800, -300)
+    wx = nt.nodes.new("ShaderNodeTexWave")
+    wx.location = (-600, -250)
+    wx.wave_type = "BANDS"
+    wx.bands_direction = "X"
+    wx.inputs["Scale"].default_value = 82.0        # ~76 mm rib pitch (2*pi/scale)
+    nt.links.new(tc.outputs["Object"], wx.inputs["Vector"])
+    wy = nt.nodes.new("ShaderNodeTexWave")
+    wy.location = (-600, -450)
+    wy.wave_type = "BANDS"
+    wy.bands_direction = "Y"
+    wy.inputs["Scale"].default_value = 82.0
+    nt.links.new(tc.outputs["Object"], wy.inputs["Vector"])
+    # AVERAGE the two directions (a MAXIMUM saturates whenever the off-axis
+    # wave sits high at that world position, flattening the ribs entirely);
+    # each face keeps ~half-amplitude ribs, so the bump strength compensates.
+    mx = nt.nodes.new("ShaderNodeMath")
+    mx.operation = "ADD"
+    mx.location = (-400, -350)
+    nt.links.new(wx.outputs["Fac"], mx.inputs[0])
+    nt.links.new(wy.outputs["Fac"], mx.inputs[1])
+    half = nt.nodes.new("ShaderNodeMath")
+    half.operation = "MULTIPLY"
+    half.location = (-250, -350)
+    half.inputs[1].default_value = 0.5
+    nt.links.new(mx.outputs["Value"], half.inputs[0])
+    _bump(nt, bsdf, half.outputs["Value"], 1.0, distance=0.015)
+
+
+def _gravel(nt, bsdf, tint, roughness):
+    """Loose gravel: voronoi stones, chunky relief, bone dry."""
+    vec = _proj(nt, 1.0)
+    vor = nt.nodes.new("ShaderNodeTexVoronoi")
+    vor.location = (-400, 0)
+    vor.inputs["Scale"].default_value = 55.0
+    nt.links.new(vec, vor.inputs["Vector"])
+    col = _ramp(nt, vor.outputs["Distance"], _shade(tint, 1.15),
+                _shade(tint, 0.6))
+    nt.links.new(col, bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = max(roughness, 0.95)
+    _bump(nt, bsdf, vor.outputs["Distance"], 0.45, distance=0.012)
 
 
 def _wood(nt, bsdf, tint, roughness):
@@ -288,6 +445,8 @@ def _metal(nt, bsdf, tint, roughness):
     bsdf.inputs["Base Color"].default_value = _shade(tint, 1.0)
     bsdf.inputs["Metallic"].default_value = 1.0
     bsdf.inputs["Roughness"].default_value = min(max(roughness, 0.15), 0.45)
+    if "Anisotropic" in bsdf.inputs:       # brushed highlights, not chrome-ball
+        bsdf.inputs["Anisotropic"].default_value = 0.5
     vec = _proj(nt, 1.0)
     n = nt.nodes.new("ShaderNodeTexNoise")
     n.location = (-400, -300)
@@ -317,6 +476,7 @@ def _grass(nt, bsdf, tint, roughness):
     nt.links.new(vec, n.inputs["Vector"])
     col = _ramp(nt, n.outputs["Fac"],
                 (0.04, 0.14, 0.03, 1.0), (0.12, 0.32, 0.07, 1.0))  # grass owns its green
+    col = _weathered(nt, col, vec, 0.75, 1.15, scale=0.25)  # patchy lawn, not felt
     nt.links.new(col, bsdf.inputs["Base Color"])
     bsdf.inputs["Roughness"].default_value = 0.95
     _bump(nt, bsdf, n.outputs["Fac"], 0.2)
@@ -328,13 +488,20 @@ def _grass(nt, bsdf, tint, roughness):
 # names keep the plain flat colour.
 _LIBRARY = [
     (("brick",), _brick),
+    (("roof tile", "terracotta", "shingle", "clay tile"), _roof_tile),
+    (("tile", "ceramic", "porcelain", "mosaic", "glazed"), _tile),
+    (("parquet", "plank", "floorboard", "decking", "timber floor",
+      "wood floor", "flooring"), _planks),
     (("wood", "timber", "oak", "ply", "lumber", "mdf", "laminate", "veneer",
-      "bamboo", "parquet"), _wood),
+      "bamboo"), _wood),
     (("waterproof", "membrane", "damp proof", "vapour", "vapor"), None),
     (("water", "pool", "pond", "lake", "fountain"), _water),
     (("asphalt", "bitumen", "tarmac", "paving", "pavement", "road"), _asphalt),
     (("concrete", "cast-in", "cast in", "screed", "cement", "cmu", "precast"),
      _concrete),
+    (("gravel", "ballast", "pebble", "scoria", "crushed rock"), _gravel),
+    (("corrugat", "colorbond", "zincalume", "standing seam", "profiled metal"),
+     _corrugated),
     (("metal", "steel", "alum", "copper", "brass", "bronze", "iron", "chrome",
       "zinc", "tin", "stainless", "metallic"), _metal),
     (("carpet", "fabric", "textile", "rug", "upholstery", "cloth", "felt",
@@ -342,25 +509,29 @@ _LIBRARY = [
     (("plaster", "stucco", "gypsum", "drywall", "plasterboard", "paint",
       "render"), _plaster),
     (("grass", "turf", "lawn", "vegetation", "planting"), _grass),
-    (("stone", "marble", "granite", "masonry", "tile", "ceramic", "porcelain",
-      "terrazzo", "slate"), _stone),
+    (("stone", "marble", "granite", "masonry", "terrazzo", "slate"), _stone),
 ]
 
 
 # Explicit surface builders, keyed for the N-panel override dropdown. "auto" (name
 # match) and "plain" (flat colour) are handled by materials.build_material, not here.
 SURFACES = {
-    "brick": _brick, "wood": _wood, "concrete": _concrete, "stone": _stone,
-    "metal": _metal, "fabric": _fabric, "grass": _grass, "plaster": _plaster,
-    "asphalt": _asphalt, "water": _water,
+    "brick": _brick, "wood": _wood, "planks": _planks, "concrete": _concrete,
+    "stone": _stone, "tile": _tile, "roof_tile": _roof_tile, "metal": _metal,
+    "corrugated": _corrugated, "fabric": _fabric, "grass": _grass,
+    "plaster": _plaster, "asphalt": _asphalt, "gravel": _gravel,
+    "water": _water,
 }
 
 # (key, label) pairs — the single source of truth for the override menu.
 CHOICES = [
-    ("brick", "Brick"), ("wood", "Wood"), ("concrete", "Concrete"),
-    ("plaster", "Plaster / Paint"), ("stone", "Stone / Tile"),
-    ("metal", "Metal"), ("fabric", "Fabric / Carpet"), ("grass", "Grass"),
-    ("asphalt", "Asphalt / Paving"), ("water", "Water"),
+    ("brick", "Brick"), ("wood", "Wood"), ("planks", "Wood Floor / Decking"),
+    ("concrete", "Concrete"), ("plaster", "Plaster / Paint"),
+    ("tile", "Tile / Ceramic"), ("roof_tile", "Roof Tiles"),
+    ("stone", "Stone / Marble"), ("metal", "Metal"),
+    ("corrugated", "Corrugated Metal"), ("fabric", "Fabric / Carpet"),
+    ("grass", "Grass"), ("asphalt", "Asphalt / Paving"),
+    ("gravel", "Gravel"), ("water", "Water"),
 ]
 
 
