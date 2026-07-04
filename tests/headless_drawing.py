@@ -165,6 +165,27 @@ def main():
     assert s2["camera"]["type"] == "perspective", "normal camera_type override broke"
     print("override guard: Open View keeps a loaded 2D view orthographic OK")
 
+    # --- Capture / Render Final / Export SVG must NOT rescale a drawing camera -----
+    build_scene(_FIX, overrides={"mode": "pen", "engine": "EEVEE",
+                                 "camera_type": "perspective"})
+    live._LOADED = object()
+    st = bpy.context.scene.bir
+    st.drawing_paper = "A2"
+    st.drawing_scale = "1:50"
+    st.drawing_dpi = "150"
+    live._pose_drawing("plan", retrace=False)
+    cam3 = bpy.context.scene.camera
+    _sync()
+    m0 = cam3.matrix_world.translation.copy()
+    os0, cs0 = cam3.data.ortho_scale, cam3.data.clip_start
+    assert live._is_drawing_camera(), "posed drawing not recognised as a drawing camera"
+    live._snap_for_capture(None)          # what Capture / Render Final / Export SVG run
+    _sync()
+    assert (cam3.matrix_world.translation - m0).length < 1e-5, "snap MOVED the drawing camera"
+    assert abs(cam3.data.ortho_scale - os0) < 1e-5, "snap RESCALED the drawing frame"
+    assert abs(cam3.data.clip_start - cs0) < 1e-5, "snap MOVED the section cut"
+    print("export/capture guard: drawing pose + scale + cut survive the snap OK")
+
     print("DRAWING OK")
 
 

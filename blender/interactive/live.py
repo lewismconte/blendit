@@ -333,6 +333,31 @@ def _snap_camera_to_view(context=None):
     _reapply_camera()
 
 
+def _is_drawing_camera():
+    """True when the export camera is a scale-true 2D drawing - a panel-posed plan /
+    elevation OR a loaded 2D crop view. Its exact ortho pose + scale + cut must not be
+    rescaled, so capture / render / vector export must NOT snap it to the viewport."""
+    cam = bpy.context.scene.camera
+    if cam is None or cam.data.type != "ORTHO":
+        return False
+    st = getattr(bpy.context.scene, "bir", None)
+    if st is not None and st.drawing_last:
+        return True
+    if _SPEC is not None and str(_SPEC.get("camera", {}).get("frame")) == "crop":
+        return True
+    return False
+
+
+def _snap_for_capture(context):
+    """Snap the camera to the view for a free-nav capture - but keep a 2D drawing's
+    exact pose (camera_to_view + convert_projection would rescale its ortho frame and
+    move its cut, throwing off the render / SVG)."""
+    if _is_drawing_camera():
+        _enter_frame()                 # already the drawing camera; just show its frame
+        return
+    _snap_camera_to_view(context)
+
+
 def _update_gizmos(self, context):
     if _SYNCING:
         return
@@ -1497,7 +1522,7 @@ class BIR_OT_render_image(bpy.types.Operator):
     bl_description = "Snap the camera to your current view and render a PNG"
 
     def execute(self, context):
-        _snap_camera_to_view(context)      # NOW, in the user's own viewport
+        _snap_for_capture(context)         # NOW, in the user's own viewport
         # Deferred via _run_busy so the WORKING banner paints before the
         # (blocking) render - same treatment as Render Final / Regenerate.
         _run_busy("Rendering capture", _do_capture)
@@ -1548,7 +1573,7 @@ class BIR_OT_regenerate_lines(bpy.types.Operator):
     def execute(self, context):
         from blender.pipeline import npr
         if npr._active_lineart_mod() is not None:   # line modes only:
-            _snap_camera_to_view(context)           # don't move the camera otherwise
+            _snap_for_capture(context)              # don't move the camera otherwise
         _run_busy("Regenerating lines", _do_regenerate_lines)
         return {"FINISHED"}
 
@@ -1611,7 +1636,7 @@ class BIR_OT_render_final(bpy.types.Operator):
                      "modes, EEVEE for line modes), saved to /finals and opened")
 
     def execute(self, context):
-        _snap_camera_to_view(context)      # NOW, in the user's own viewport
+        _snap_for_capture(context)         # NOW, in the user's own viewport
         _run_busy("Rendering final", _do_render_final)
         return {"FINISHED"}
 
@@ -1664,7 +1689,7 @@ class BIR_OT_export_vector(bpy.types.Operator):
     def execute(self, context):
         from blender.pipeline import vector_export
         if vector_export.has_line_art():        # don't move the camera just to
-            _snap_camera_to_view(context)       # report "needs a line mode"
+            _snap_for_capture(context)          # report "needs a line mode"
         fmt = (self.fmt or "svg").lower()
         _run_busy("Exporting %s" % fmt.upper(), lambda: _do_export_vector(fmt))
         return {"FINISHED"}
@@ -1681,7 +1706,7 @@ class BIR_OT_bookmark_add(bpy.types.Operator):
         if st is None or context.scene.camera is None:
             return {"CANCELLED"}
         global _SYNCING, _STATUS
-        _snap_camera_to_view(context)      # save what the user SEES
+        _snap_for_capture(context)         # save what the user SEES
         it = st.bookmarks.add()
         _SYNCING = True
         try:
@@ -1757,7 +1782,7 @@ class BIR_OT_contact_sheet(bpy.types.Operator):
     def execute(self, context):
         if _BUSY or _LOADED is None or context.scene.camera is None:
             return {"CANCELLED"}
-        _snap_camera_to_view(context)      # the sheet shows THIS shot
+        _snap_for_capture(context)         # the sheet shows THIS shot
         _run_busy_chain(_contact_steps)
         return {"FINISHED"}
 
