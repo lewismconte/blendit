@@ -70,25 +70,72 @@ def setup_camera(spec, scale):
     two_point = bool(cspec.get("two_point_perspective", False)) and not ortho
     aspect = _aspect(spec)
     margin = float(cspec.get("framing_margin", DEFAULT_MARGIN))
+    # A cropped 2D view from Revit (plan / section / elevation) carries its OWN
+    # reliable frame, so we honour the spec pose + ortho_scale instead of auto-fitting.
+    crop = ortho and str(cspec.get("frame", "fit")) == "crop"
 
     _configure_lens(cam_data, cspec, ortho)
 
-    if two_point:
-        leveled = _level(forward)
-        if leveled is not None:
-            forward, up = leveled, mathutils.Vector((0.0, 0.0, 1.0))
-        # else: looking (near) straight up/down — two-point undefined, keep the view.
+    if crop:
+        _place_from_spec(cam_obj, cam_data, forward, up, scale, cspec)
+    else:
+        if two_point:
+            leveled = _level(forward)
+            if leveled is not None:
+                forward, up = leveled, mathutils.Vector((0.0, 0.0, 1.0))
+            # else: looking (near) straight up/down — two-point undefined, keep view.
+        _frame_to_geometry(cam_obj, cam_data, forward, up, aspect, scale, cspec,
+                           ortho=ortho, margin=margin)
+        # Lens shift slides the frame without tilting, so it preserves two-point.
+        cam_data.shift_x = float(cspec.get("shift_x", 0.0))
+        cam_data.shift_y = float(cspec.get("shift_y", 0.0))
 
-    _frame_to_geometry(cam_obj, cam_data, forward, up, aspect, scale, cspec,
-                       ortho=ortho, margin=margin)
-
-    # Lens shift slides the frame without tilting, so it preserves two-point.
-    cam_data.shift_x = float(cspec.get("shift_x", 0.0))
-    cam_data.shift_y = float(cspec.get("shift_y", 0.0))
-
-    cam_data.clip_start = max(0.01, float(cspec.get("clip_start", 0.1)) * scale)
+    # A section cut (plan cut plane / section line) rides on the near clip.
+    cut = cspec.get("cut_distance")
+    if cut is not None:
+        cam_data.clip_start = max(0.001, float(cut) * scale)
+    else:
+        cam_data.clip_start = max(0.01, float(cspec.get("clip_start", 0.1)) * scale)
     cam_data.clip_end = max(1000.0, float(cspec.get("clip_end", 10000.0)) * scale)
     return cam_obj
+
+
+def _place_from_spec(cam_obj, cam_data, forward, up_hint, scale, cspec):
+    """Place an ORTHO camera from the spec's own pose + ortho_scale (a cropped 2D
+    Revit view), skipping the geometry auto-fit. Uses a HORIZONTAL sensor fit so
+    ortho_scale spans the sheet width (the crop rectangle's width), and builds the
+    pose from an explicit (right, up, back) basis so page-up is exact even looking
+    straight down in a plan."""
+    pos = _vec(cspec.get("position", [0.0, 0.0, 0.0]), scale)
+    right = forward.cross(up_hint)
+    if right.length < 1e-9:
+        right = forward.cross(mathutils.Vector((0.0, 0.0, 1.0)))
+    if right.length < 1e-9:
+        right = mathutils.Vector((1.0, 0.0, 0.0))
+    right.normalize()
+    true_up = right.cross(forward).normalized()
+    rot = mathutils.Matrix((
+        (right.x, true_up.x, -forward.x),
+        (right.y, true_up.y, -forward.y),
+        (right.z, true_up.z, -forward.z),
+    )).to_4x4()
+    cam_obj.matrix_world = mathutils.Matrix.Translation(pos) @ rot
+    cam_data.sensor_fit = "HORIZONTAL"
+    cam_data.shift_x = 0.0
+    cam_data.shift_y = 0.0
+    os_ = cspec.get("ortho_scale")
+    if os_:
+        cam_data.ortho_scale = float(os_) * scale       # crop width, scale-true
+    else:                                               # no crop size -> fit fallback
+        bb = _scene_bbox(exclude=_DRAWING_BBOX_EXCLUDE)
+        if bb is not None:
+            mn, mx = bb
+            center = (mn + mx) * 0.5
+            corners = [mathutils.Vector((x, y, z))
+                       for x in (mn.x, mx.x) for y in (mn.y, mx.y) for z in (mn.z, mx.z)]
+            ext_r = max(abs((c - center).dot(right)) for c in corners)
+            ext_u = max(abs((c - center).dot(true_up)) for c in corners)
+            cam_data.ortho_scale = 2.0 * max(ext_r, ext_u) * DEFAULT_MARGIN
 
 
 def convert_projection(cam_obj, mode, focal_mm=None, extra_shift=0.0):

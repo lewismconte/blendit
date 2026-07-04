@@ -100,6 +100,33 @@ def main():
     print("section cut: clip_start slices between near (%.2f) and far (%.2f) OK" % (
         near, far))
 
+    # --- LOADED 2D VIEW: a cropped Revit view drives the camera via the spec -------
+    # Honor-crop: setup_camera must use the spec's OWN pose + ortho_scale + cut,
+    # not auto-fit to geometry (this is the Load View -> plan path).
+    build_scene(_FIX, overrides={"mode": "white", "engine": "EEVEE",
+                                 "camera_type": "perspective"})
+    bb2 = _scene_bbox(exclude=cam_mod._DRAWING_BBOX_EXCLUDE)
+    mn2, mx2 = bb2
+    c2 = (mn2 + mx2) * 0.5
+    eye = [c2.x, c2.y, mx2.z + 20.0]                 # look straight down from above
+    spec = {"camera": {"name": "Level 1", "type": "orthographic", "frame": "crop",
+                       "position": eye, "target": [c2.x, c2.y, c2.z], "up": [0, 1, 0],
+                       "ortho_scale": 30.0, "cut_distance": 21.5, "clip_end": 10000.0},
+            "render": {"resolution": [1000, 1000]}}
+    cam2 = cam_mod.setup_camera(spec, 1.0)           # scale 1.0: spec is already metres
+    _sync()
+    assert cam2.data.type == "ORTHO", "loaded view is not ORTHO"
+    assert cam2.data.sensor_fit == "HORIZONTAL", "crop camera sensor fit wrong"
+    assert abs(cam2.data.ortho_scale - 30.0) < 1e-4, (
+        "crop ortho_scale not honoured (auto-fit leaked?): %.3f" % cam2.data.ortho_scale)
+    assert abs(cam2.data.clip_start - 21.5) < 1e-4, (
+        "cut_distance not applied to the near clip: %.3f" % cam2.data.clip_start)
+    assert (cam2.matrix_world.translation - mathutils.Vector(eye)).length < 1e-4, (
+        "crop camera not placed at the spec eye")
+    fwd2 = (cam2.matrix_world.to_quaternion() @ mathutils.Vector((0, 0, -1))).normalized()
+    assert fwd2.z < -0.999, "crop camera not looking down"
+    print("loaded 2D view: crop camera from spec (ortho 30, cut 21.5, placed) OK")
+
     # --- LIVE WIRING: a paper size + scale reach the render camera ----------------
     import blender.interactive.live as live
     for cls in live._CLASSES:
@@ -127,6 +154,16 @@ def main():
     assert st.drawing_last == "north", "drawing_last not recorded"
     assert st.projection == "ORTHO", "View panel projection not synced to ORTHO"
     print("live wiring: A1 1:100 @150dpi -> 4967x3508 px, ortho_scale 84.1 OK")
+
+    # --- Open View's perspective default must NOT clobber a loaded 2D view ---------
+    from blender.pipeline.run import _apply_overrides
+    s1 = {"camera": {"type": "orthographic", "frame": "crop"}, "render": {}}
+    _apply_overrides(s1, {"camera_type": "perspective", "mode": "pen"})
+    assert s1["camera"]["type"] == "orthographic", "loaded 2D camera clobbered to perspective"
+    s2 = {"camera": {"type": "perspective"}, "render": {}}
+    _apply_overrides(s2, {"camera_type": "perspective"})
+    assert s2["camera"]["type"] == "perspective", "normal camera_type override broke"
+    print("override guard: Open View keeps a loaded 2D view orthographic OK")
 
     print("DRAWING OK")
 

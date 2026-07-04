@@ -30,12 +30,12 @@ def extract_or_demo(doc, cfg, report, progress=None):
     else:
         try:
             from bir_extract import revit_extract
-            view = revit_extract.active_3d_view(doc)
+            view = revit_extract.active_view(doc)
             if view is None:
-                report("- active view isn't a 3D view -> using demo box "
-                       "(open a 3D view to render the model)")
+                report("- active view can't be loaded -> using demo box "
+                       "(open a 3D, plan, section or elevation view)")
             else:
-                report("- extracting the active 3D view...")
+                report("- extracting the active view...")
                 spec, meshes = revit_extract.build_scene_spec(
                     doc, view, render_overrides=overrides, progress=progress)
                 if meshes:
@@ -127,14 +127,14 @@ _FINGERPRINT_NAME = "fingerprint.json"
 
 def _model_fingerprint(doc):
     """-> {view, elements, file_mtime} for the CURRENT model state, or None when
-    it can't be computed (no doc / not a 3D view / headless)."""
+    it can't be computed (no doc / unsupported view / headless)."""
     if doc is None:
         return None
     try:
         from bir_extract import revit_extract, _compat
         if _compat.DB is None:
             return None
-        view = revit_extract.active_3d_view(doc)
+        view = revit_extract.active_view(doc)
         if view is None:
             return None
         count = (_compat.DB.FilteredElementCollector(doc, view.Id)
@@ -189,7 +189,7 @@ def staleness(doc):
     if not old or not new:
         return None
     if old.get("view") != new.get("view"):
-        return ("the active 3D view is '%s' but '%s' was loaded"
+        return ("the active view is '%s' but '%s' was loaded"
                 % (new.get("view"), old.get("view")))
     if old.get("elements") != new.get("elements"):
         return ("the model has changed (%s elements now vs %s at Load)"

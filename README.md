@@ -37,8 +37,10 @@ locking your work in.
 - ☁️ **Atmosphere & weather** — procedural **volumetric clouds** and sky: seven cloud
   types (fair-weather cumulus → overcast → towering storm), a live sun / time-of-day,
   and a 360° storm-ring mode. All procedural — no downloads, no huge sky files.
-- 📐 **2D drawings** — pose scale-true **plans, elevations and sections** (1:50, 1:100,
-  …) sized to real **paper** (A0–A4, Letter, Tabloid) at print DPI, with a section-cut
+- 📐 **2D drawings** — **load a Revit plan, section or elevation directly** (it comes
+  across as a scale-true orthographic drawing, framed to its crop and cut at its view
+  range), or pose one in Blender: **plans, elevations and sections** (1:50, 1:100, …)
+  sized to real **paper** (A0–A4, Letter, Tabloid) at print DPI, with a section-cut
   slider. Pair them with the drawing looks and export as PNG or vector.
 - ✏️ **Vector export (SVG / PDF)** — any line style exports as true, editable vector
   paths for Illustrator, Inkscape or CAD — not a pixel image.
@@ -95,9 +97,10 @@ find one (or you can set it under **Settings**).
 
 From the **Blendit** ribbon:
 
-1. Open a **3D view** in Revit.
+1. Open a **3D view** — or a **plan / section / elevation** — in Revit.
 2. **Load View** — pulls the active view across (the one slow step, with a progress
-   bar).
+   bar). A 2D view arrives as a scale-true orthographic drawing, cut and framed to
+   match Revit.
 3. Then either:
    - **Open View** — opens it in Blender to fly around, compose, tweak the look, pose
      2D plans / elevations / sections, and capture your shot, or

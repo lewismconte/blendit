@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """Load the active view into Blendit's model cache.
 
+Works on a **3D view** OR a **plan / section / elevation** - a 2D view loads as a
+scale-true orthographic drawing (framed to its crop, cut at its view range) that you
+can render straight away or refine in Open View.
+
 This is the one slow step (it tessellates the whole view), so it is explicit and
 shows a progress bar - no surprise long operations hidden behind a render button.
 It does NOT open Blender; once loaded, use **Open View** to work it interactively

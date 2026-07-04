@@ -105,7 +105,11 @@ def _apply_overrides(spec, overrides):
     if overrides.get("denoise") is not None:
         r["denoise"] = bool(overrides["denoise"])
     if overrides.get("camera_type"):
-        spec.setdefault("camera", {})["type"] = str(overrides["camera_type"])
+        cam = spec.setdefault("camera", {})
+        # A loaded 2D view (plan / section / elevation) carries its own orthographic
+        # crop camera; the session's default 'perspective' must not clobber it.
+        if str(cam.get("frame")) != "crop":
+            cam["type"] = str(overrides["camera_type"])
     if overrides.get("two_point") is not None:
         spec.setdefault("camera", {})["two_point_perspective"] = bool(
             overrides["two_point"])
