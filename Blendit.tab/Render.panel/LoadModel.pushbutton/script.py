@@ -18,15 +18,15 @@ bir_bootstrap.ensure_paths()
 import bir_config
 import bir_export
 from bir_ui import (report as _report, active_doc as _active_doc,
-                    ensure_3d_view as _ensure_3d_view)
+                    ensure_loadable_view as _ensure_loadable_view)
 
 
 def main():
     cfg = bir_config.load()
     doc = _active_doc()
-    if not _ensure_3d_view(doc, _report):     # need a 3D view to extract
+    if not _ensure_loadable_view(doc, _report):   # 3D view or a 2D plan/section/elev
         return
-    _report("**Blendit - Load View** - extracting the active 3D view. This can take "
+    _report("**Blendit - Load View** - extracting the active view. This can take "
             "a while on a large model; the progress bar shows it working.")
 
     bundle_ref, _blend = bir_export.refresh_cache(doc, cfg, _report)

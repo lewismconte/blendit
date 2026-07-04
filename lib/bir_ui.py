@@ -143,37 +143,43 @@ def require_loaded(doc):
     try:
         from pyrevit import forms
         forms.alert("No view is loaded yet.\n\nPress 'Load View' to extract the "
-                    "active 3D view first, then try again.",
+                    "active view first, then try again.",
                     title="Blendit - no view loaded")
     except Exception:
         pass
     return None, None
 
 
-def ensure_3d_view(doc, report=None):
-    """True if the active view is a renderable 3D view, else show an alert telling
-    the user to open one and return False.
+def ensure_loadable_view(doc, report=None):
+    """True if the active view is one Blendit can extract - a 3D view OR a 2D plan /
+    section / elevation - else show an alert and return False.
 
-    Blendit renders the ACTIVE 3D view; pressing a button from a plan/sheet would
-    otherwise extract nothing and fall back to a confusing demo box. doc is None
-    only headless/in dev, where the demo box is wanted - so allow that."""
+    Pressing a button from a sheet / schedule / drafting view would otherwise extract
+    nothing and fall back to a confusing demo box. doc is None only headless/in dev,
+    where the demo box is wanted - so allow that."""
     if doc is None:
         return True
     try:
         from bir_extract import revit_extract
-        if revit_extract.active_3d_view(doc) is not None:
+        if revit_extract.active_view(doc) is not None:
             return True
     except Exception:
         return True            # don't block on an import hiccup; extraction reports
     try:
         from pyrevit import forms
-        forms.alert("Open a 3D view first.\n\nBlendit renders the active 3D view - "
-                    "switch to (or create) a 3D view, then press the button again.",
-                    title="Blendit - no 3D view")
+        forms.alert("Open a view Blendit can load.\n\nLoad View works on a 3D view or "
+                    "a plan / section / elevation - switch to one (not a sheet or "
+                    "schedule), then press the button again.",
+                    title="Blendit - view can't be loaded")
     except Exception:
         if report:
-            report("**No 3D view active.** Open a 3D view and try again.")
+            report("**This view can't be loaded.** Open a 3D, plan, section or "
+                   "elevation view and try again.")
     return False
+
+
+# Back-compat alias (older name; now accepts 2D views too).
+ensure_3d_view = ensure_loadable_view
 
 
 def launch_headless_render(cfg, report, banner="Render Loaded"):
