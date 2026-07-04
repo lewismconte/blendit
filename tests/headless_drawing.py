@@ -237,6 +237,18 @@ def main():
         "PDF page not physically A2")
     print("vector export: true-scale 60.96x91.44mm @1:50, un-stretched, A2 page (SVG+PDF) OK")
 
+    # --- scale bar on the vector export (same A2 1:50 drawing) --------------------
+    svgs = vector_export.export_vector(os.path.join(dd, "s.svg"), "svg",
+                                       paper={"w_mm": PW, "h_mm": PH, "scalebar": True})
+    stxt = open(svgs).read()
+    assert "1:50" in stxt, "scale bar 1:N label missing from SVG"
+    assert re.search(r">\d+ m<", stxt), "scale bar metre label missing from SVG"
+    pdfs = vector_export.export_vector(os.path.join(dd, "s.pdf"), "pdf",
+                                       paper={"w_mm": PW, "h_mm": PH, "scalebar": True})
+    pb = open(pdfs, "rb").read()
+    assert b"/Helvetica" in pb and b"(1:50)" in pb, "scale bar text missing from PDF"
+    print("scale bar: 1:50 + metre labels on SVG and PDF OK")
+
     # --- poche: solid cut fill in render geometry + vector ------------------------
     from blender.pipeline import poche
     build_scene(_FIX, overrides={"mode": "pen", "engine": "EEVEE",

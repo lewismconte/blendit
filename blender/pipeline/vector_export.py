@@ -190,7 +190,49 @@ def _set_svg_page(svg_text, w_mm, h_mm):
     return svg_text[:m.start()] + tag + svg_text[m.end():]
 
 
-def _reframe_svg_to_paper(svg_text, scene, camera, paper_w_mm, paper_h_mm):
+def _rect_d(x, y, w, h):
+    return "M %.3f %.3f L %.3f %.3f L %.3f %.3f L %.3f %.3f Z" % (
+        x, y, x + w, y, x + w, y + h, x, y + h)
+
+
+def _nice_total(D):
+    """A round real-world length whose bar is closest to ~60 mm on the page."""
+    nice = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000]
+    return min(nice, key=lambda n: abs(n * 1000.0 / D - 60.0))
+
+
+def _scale_bar_svg(pw, ph, D):
+    """A graphical scale bar (4 alternating segments + labels + '1:D') at the sheet's
+    bottom-left, in paper mm. Fills-only (black bar with inset white segments) so it
+    survives the SVG->PDF path converter; labels are <text>."""
+    if D <= 0:
+        return ""
+    total = _nice_total(D)
+    barw = total * 1000.0 / D          # mm on the page
+    segs, bt, h, mx = 4, 0.3, 3.0, 15.0
+    seg = barw / segs
+    x0 = mx
+    y0 = ph - 12.0 - h                 # 12 mm up from the bottom edge
+    out = ['<g fill="#000000" font-family="sans-serif">']
+    out.append('<path d="%s" fill="#000000"/>' % _rect_d(x0, y0, barw, h))
+    for i in range(segs):
+        if i % 2 == 1:                 # white insets leave a black frame + dividers
+            out.append('<path d="%s" fill="#ffffff"/>'
+                       % _rect_d(x0 + i * seg + bt, y0 + bt, seg - 2 * bt, h - 2 * bt))
+    lbl = 'font-size="3" text-anchor="middle"'
+    out.append('<text x="%.2f" y="%.2f" %s>0</text>' % (x0, y0 - 1.5, lbl))
+    out.append('<text x="%.2f" y="%.2f" %s>%g</text>'
+               % (x0 + barw / 2.0, y0 - 1.5, lbl, total / 2.0))
+    out.append('<text x="%.2f" y="%.2f" %s>%g m</text>'
+               % (x0 + barw, y0 - 1.5, lbl, total))
+    out.append('<text x="%.2f" y="%.2f" font-size="3.2">1:%g</text>'
+               % (x0, y0 + h + 4.0, round(D)))
+    out.append("</g>")
+    return "".join(out)
+
+
+def _reframe_svg_to_paper(svg_text, scene, camera, paper_w_mm, paper_h_mm,
+                          scalebar=False):
     """Remap a GP-exported SVG onto a true-scale, paper-sized page. Returns the
     rewritten SVG (or the original, unchanged, if anything is missing)."""
     from .svg_to_pdf import _paths, _subpaths
@@ -243,6 +285,12 @@ def _reframe_svg_to_paper(svg_text, scene, camera, paper_w_mm, paper_h_mm):
         m = re.search(r"<svg\b[^>]*>", body)
         if m:
             body = body[:m.end()] + poche_svg + body[m.end():]
+    if scalebar:
+        # effective scale of THIS export: frame width / paper width
+        d_eff = ortho_w / (paper_w_mm / 1000.0) if paper_w_mm else 0.0
+        bar = _scale_bar_svg(paper_w_mm, paper_h_mm, d_eff)
+        if bar:
+            body = body.replace("</svg>", bar + "</svg>", 1)   # on top of everything
     return body
 
 
@@ -300,7 +348,8 @@ def _reframe_file(path, paper):
         finally:
             f.close()
         new = _reframe_svg_to_paper(txt, bpy.context.scene, bpy.context.scene.camera,
-                                    float(paper["w_mm"]), float(paper["h_mm"]))
+                                    float(paper["w_mm"]), float(paper["h_mm"]),
+                                    scalebar=bool(paper.get("scalebar")))
         f = open(path, "w", encoding="utf-8")
         try:
             f.write(new)

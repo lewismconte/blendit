@@ -1170,6 +1170,9 @@ class BIR_Settings(bpy.types.PropertyGroup):
         name="Poche Tone", default=0.13, min=0.0, max=1.0, subtype="FACTOR",
         description="Poche fill lightness: 0 = black, 1 = white",
         update=_update_drawing_poche_tone)
+    drawing_scalebar: bpy.props.BoolProperty(
+        name="Scale Bar", default=True,
+        description="Add a graphical scale bar + 1:N label to SVG / PDF exports")
     drawing_last: bpy.props.StringProperty(default="", options={"HIDDEN"})
 
 
@@ -1745,7 +1748,8 @@ def _do_export_vector(fmt):
     st = getattr(bpy.context.scene, "bir", None)
     if st is not None and _is_drawing_camera():
         w_mm, h_mm = _paper_dims_mm(st)
-        paper = {"w_mm": float(w_mm), "h_mm": float(h_mm)}
+        paper = {"w_mm": float(w_mm), "h_mm": float(h_mm),
+                 "scalebar": bool(st.drawing_scalebar)}
     try:
         path = vector_export.export_vector(out, fmt, paper=paper)
     except Exception as ex:
@@ -2215,6 +2219,7 @@ class BIR_PT_drawing(_Sub, bpy.types.Panel):
         exp = layout.row(align=True)
         exp.scale_y = 1.2
         exp.operator("bir.export_drawing", icon="RENDER_STILL")
+        layout.prop(st, "drawing_scalebar", toggle=True, icon="FIXED_SIZE")
         vec = layout.row(align=True)
         vec.operator("bir.export_vector", text="SVG").fmt = "svg"
         vec.operator("bir.export_vector", text="PDF").fmt = "pdf"

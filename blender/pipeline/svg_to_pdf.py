@@ -20,6 +20,8 @@ _VIEWBOX = re.compile(r'viewBox="\s*(-?[\d.]+)[\s,]+(-?[\d.]+)[\s,]+'
 _PATH = re.compile(r"<path\b([^>]*?)/?>", re.DOTALL)
 _DATTR = re.compile(r'\bd="([^"]*)"', re.DOTALL)
 _FILLATTR = re.compile(r'\bfill="([^"]*)"')
+_TEXT = re.compile(r"<text\b([^>]*)>(.*?)</text>", re.DOTALL)
+_HELV_W = 0.5      # rough Helvetica average glyph width (in font-size units)
 
 
 def _paths(svg):
@@ -145,19 +147,62 @@ def _content(svg, minx, miny, h, s=1.0):
     return "\n".join(out)
 
 
+def _attr(attrs, name, default):
+    m = re.search(r'\b%s="([^"]*)"' % name, attrs)
+    return m.group(1) if m else default
+
+
+def _num(v, default):
+    m = re.match(r"\s*(-?\d*\.?\d+)", v or "")
+    return float(m.group(1)) if m else default
+
+
+def _pdf_escape(t):
+    return t.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _text_content(svg, minx, miny, h, s):
+    """PDF text ops for every <text> (Helvetica /F1). Approximates text-anchor with
+    an average glyph width; SVG y (baseline, top-down) -> PDF y (bottom-up)."""
+    ops = []
+    for m in _TEXT.finditer(svg):
+        attrs, inner = m.group(1), m.group(2)
+        content = re.sub(r"<[^>]*>", "", inner).strip()
+        if not content:
+            continue
+        x = _num(_attr(attrs, "x", "0"), 0.0)
+        y = _num(_attr(attrs, "y", "0"), 0.0)
+        size = _num(_attr(attrs, "font-size", "3"), 3.0)
+        anchor = _attr(attrs, "text-anchor", "start")
+        width = len(content) * _HELV_W * size
+        if anchor == "middle":
+            x -= width / 2.0
+        elif anchor == "end":
+            x -= width
+        px = (x - minx) * s
+        py = (h - (y - miny)) * s
+        ops.append("BT /F1 %.2f Tf %.2f %.2f Td (%s) Tj ET"
+                   % (size * s, px, py, _pdf_escape(content)))
+    return "\n".join(ops)
+
+
 def svg_to_pdf(svg_text):
-    """Convert a Grease-Pencil-exported SVG string to PDF bytes."""
+    """Convert a Grease-Pencil-exported SVG string to PDF bytes (paths + text)."""
     minx, miny, w, h = _viewbox(svg_text)
     s = _unit_scale(svg_text)
-    content = _content(svg_text, minx, miny, h, s).encode("ascii")
+    body = _content(svg_text, minx, miny, h, s)
+    txt = _text_content(svg_text, minx, miny, h, s)
+    content = (body + ("\n" + txt if txt else "")).encode("ascii")
 
     objs = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         ("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.3f %.3f] "
-         "/Contents 4 0 R >>" % (w * s, h * s)).encode("ascii"),
+         "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+         % (w * s, h * s)).encode("ascii"),
         b"<< /Length " + str(len(content)).encode("ascii") + b" >>\nstream\n"
         + content + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
 
     out = bytearray(b"%PDF-1.4\n")

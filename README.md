@@ -41,7 +41,8 @@ locking your work in.
   across as a scale-true orthographic drawing, framed to its crop and cut at its view
   range), or pose one in Blender: **plans, elevations and sections** (1:50, 1:100, …)
   sized to real **paper** (A0–A4, Letter, Tabloid) at print DPI, with a section-cut
-  slider. Pair them with the drawing looks and export as PNG or vector.
+  slider, solid **poché** cut-fill, and a graphical **scale bar**. Pair them with the
+  drawing looks and export as PNG or vector.
 - ✏️ **Vector export (SVG / PDF)** — any line style exports as true, editable vector
   paths for Illustrator, Inkscape or CAD — not a pixel image. 2D drawings export
   **to scale on a real paper-sized page** (A2 at 1:50 is A2 at 1:50).
