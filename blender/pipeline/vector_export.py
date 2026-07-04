@@ -235,7 +235,60 @@ def _reframe_svg_to_paper(svg_text, scene, camera, paper_w_mm, paper_h_mm):
         return tag[:dm.start(1)] + _transform_d(dm.group(1), fn) + tag[dm.end(1):]
 
     body = re.sub(r"<path\b[^>]*?/?>", _repl_path, svg_text, flags=re.DOTALL)
-    return _set_svg_page(body, paper_w_mm, paper_h_mm)
+    body = _set_svg_page(body, paper_w_mm, paper_h_mm)
+    # Poche is scene geometry (excluded from Line Art), so add its filled cut faces
+    # to the vector directly - projected through the same calibration, UNDER the lines.
+    poche_svg = _poche_paths(camera, ax, bx, ay, by, fn)
+    if poche_svg:
+        m = re.search(r"<svg\b[^>]*>", body)
+        if m:
+            body = body[:m.end()] + poche_svg + body[m.end():]
+    return body
+
+
+def _poche_fill():
+    obj = bpy.data.objects.get("BIR_Poche")
+    if obj is None or not obj.data.materials:
+        return "#222222"
+    try:
+        for n in obj.data.materials[0].node_tree.nodes:
+            if n.type == "EMISSION":
+                c = n.inputs["Color"].default_value
+                return "#%02x%02x%02x" % (int(c[0] * 255), int(c[1] * 255),
+                                          int(c[2] * 255))
+    except Exception:
+        pass
+    return "#222222"
+
+
+def _poche_paths(camera, ax, bx, ay, by, fn):
+    """Filled <path> elements for the BIR_Poche caps, projected onto the paper via
+    the same world->SVG affine (ax/bx/ay/by) + SVG->paper map (fn). '' if no poche."""
+    obj = bpy.data.objects.get("BIR_Poche")
+    if obj is None or obj.type != "MESH":
+        return ""
+    import mathutils
+    q = camera.matrix_world.to_quaternion()
+    right = (q @ mathutils.Vector((1.0, 0.0, 0.0))).normalized()
+    up = (q @ mathutils.Vector((0.0, 1.0, 0.0))).normalized()
+    pos = camera.matrix_world.translation
+    mw = obj.matrix_world
+    me = obj.data
+    fill = _poche_fill()
+    segs = []
+    for poly in me.polygons:
+        pts = []
+        for vi in poly.vertices:
+            v = mw @ me.vertices[vi].co
+            u = (v - pos).dot(right)
+            w = (v - pos).dot(up)
+            pts.append(fn(ax * u + bx, ay * w + by))
+        if len(pts) < 3:
+            continue
+        d = ("M %.3f %.3f" % pts[0]
+             + "".join(" L %.3f %.3f" % p for p in pts[1:]) + " Z")
+        segs.append('<path d="%s" fill="%s" stroke="none"/>' % (d, fill))
+    return "".join(segs)
 
 
 def _reframe_file(path, paper):

@@ -875,6 +875,8 @@ def _pose_drawing(direction, retrace=False):
         _do_regenerate_lines()            # re-trace + WYSIWYG frame for the new angle
     else:
         _enter_frame()
+    if st.drawing_poche:                  # new angle / cut -> refresh the fill
+        _poche_defer()
     kind = "" if direction in ("plan", "ceiling") else " elevation"
     _STATUS = "Drawing: %s%s (%s)" % (_DRAW_LABELS.get(direction, direction), kind,
                                       st.drawing_scale)
@@ -901,11 +903,75 @@ def _update_drawing_cut(self, context):
     if cam is None or cam.data.type != "ORTHO" or not self.drawing_last:
         return
     cammod.apply_section_cut(cam, self.drawing_cut_depth if self.drawing_cut else 0.0)
+    if self.drawing_poche:                # cut moved -> refresh the fill (debounced)
+        _poche_defer()
     _redraw_all()
 
 
 def _update_drawing_guide(self, context):
     _redraw_all()
+
+
+_POCHE_GEN = 0
+
+
+def _cut_plane_world():
+    """(co, no) of the section cut plane in world space, from the camera near clip."""
+    import mathutils
+    cam = bpy.context.scene.camera
+    fwd = (cam.matrix_world.to_quaternion()
+           @ mathutils.Vector((0.0, 0.0, -1.0))).normalized()
+    co = cam.matrix_world.translation + fwd * cam.data.clip_start
+    return co, fwd
+
+
+def _rebuild_poche_now():
+    from blender.pipeline import poche
+    sc = bpy.context.scene
+    st = getattr(sc, "bir", None)
+    cam = sc.camera
+    if (st is None or cam is None or cam.data.type != "ORTHO"
+            or not st.drawing_poche or not st.drawing_cut):
+        poche.clear_poche()
+        _redraw_all()
+        return
+    co, no = _cut_plane_world()
+    t = float(st.drawing_poche_tone)
+    poche.build_poche(co, no, color=(t, t, t))
+    _redraw_all()
+
+
+def _poche_defer():
+    """Debounced poche rebuild: the bmesh cut/cap over the whole model is heavy, so
+    coalesce rapid cut-slider changes into one rebuild after the drag settles."""
+    global _POCHE_GEN
+    _POCHE_GEN += 1
+    gen = _POCHE_GEN
+
+    def _later():
+        if gen != _POCHE_GEN:
+            return None                  # superseded by a newer request
+        _run_busy("Building poche", _rebuild_poche_now)
+        return None
+    try:
+        bpy.app.timers.register(_later, first_interval=0.25)
+    except Exception:
+        _rebuild_poche_now()
+
+
+def _update_drawing_poche(self, context):
+    if _SYNCING:
+        return
+    _poche_defer()
+
+
+def _update_drawing_poche_tone(self, context):
+    if _SYNCING:
+        return
+    from blender.pipeline import poche
+    if bpy.data.objects.get(poche.POCHE_OBJ) is not None:
+        poche._poche_material((self.drawing_poche_tone,) * 3)
+        _redraw_all()
 
 
 class BIR_Settings(bpy.types.PropertyGroup):
@@ -1095,6 +1161,15 @@ class BIR_Settings(bpy.types.PropertyGroup):
                     "at the chosen scale) with a size / scale label - the drawing "
                     "equivalent of Frame View's passepartout",
         update=_update_drawing_guide)
+    drawing_poche: bpy.props.BoolProperty(
+        name="Poche (fill cut)", default=False,
+        description="Fill the elements the cut passes through, solid - the way a plan "
+                    "/ section is poched. Needs Section Cut on",
+        update=_update_drawing_poche)
+    drawing_poche_tone: bpy.props.FloatProperty(
+        name="Poche Tone", default=0.13, min=0.0, max=1.0, subtype="FACTOR",
+        description="Poche fill lightness: 0 = black, 1 = white",
+        update=_update_drawing_poche_tone)
     drawing_last: bpy.props.StringProperty(default="", options={"HIDDEN"})
 
 
@@ -2125,6 +2200,12 @@ class BIR_PT_drawing(_Sub, bpy.types.Panel):
         sub = cut.row(align=True)
         sub.enabled = st.drawing_cut
         sub.prop(st, "drawing_cut_depth", slider=True)
+        poc = cut.column(align=True)
+        poc.enabled = st.drawing_cut
+        poc.prop(st, "drawing_poche", toggle=True, icon="MOD_SOLIDIFY")
+        tone = poc.row(align=True)
+        tone.enabled = st.drawing_cut and st.drawing_poche
+        tone.prop(st, "drawing_poche_tone", slider=True)
         sc = context.scene
         layout.label(text="Sheet: %d x %d px" %
                      (sc.render.resolution_x, sc.render.resolution_y),

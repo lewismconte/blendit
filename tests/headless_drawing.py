@@ -237,6 +237,32 @@ def main():
         "PDF page not physically A2")
     print("vector export: true-scale 60.96x91.44mm @1:50, un-stretched, A2 page (SVG+PDF) OK")
 
+    # --- poche: solid cut fill in render geometry + vector ------------------------
+    from blender.pipeline import poche
+    build_scene(_FIX, overrides={"mode": "pen", "engine": "EEVEE",
+                                 "camera_type": "perspective"})
+    sc = bpy.context.scene
+    sc.render.resolution_x = sc.render.resolution_y = 800
+    co = sc.camera
+    cam_mod.frame_ortho_drawing(co, "plan", ortho_scale=None, aspect=1.0)
+    cam_mod.apply_section_cut(co, 0.5)
+    fwd = (co.matrix_world.to_quaternion() @ mathutils.Vector((0, 0, -1))).normalized()
+    pco = co.matrix_world.translation + fwd * co.data.clip_start
+    pobj = poche.build_poche(pco, fwd)
+    assert pobj is not None and len(pobj.data.polygons) >= 1, "poche produced no cap face"
+    assert pobj.lineart.usage == "EXCLUDE", "poche not excluded from Line Art"
+    poche.clear_poche()
+    assert bpy.data.objects.get("BIR_Poche") is None, "clear_poche left the object behind"
+    poche.build_poche(pco, fwd)          # rebuild for the vector check
+    npr.unbake_line_art(); npr.refresh_line_art(); npr.bake_line_art()
+    svgq = vector_export.export_vector(os.path.join(tempfile.mkdtemp(), "q.svg"), "svg",
+                                       paper={"w_mm": 400.0, "h_mm": 400.0})
+    qtxt = open(svgq).read()
+    fills = [f for _d, f in re.findall(r'<path d="([^"]*)" fill="(#[0-9a-fA-F]{6})"', qtxt)
+             if f.lower() != "#000000"]
+    assert fills, "poche fill missing from the SVG export"
+    print("poche: cut cap (render) + fill in SVG export, clear works OK")
+
     print("DRAWING OK")
 
 
