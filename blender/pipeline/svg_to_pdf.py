@@ -62,6 +62,8 @@ def _subpaths(d):
                 cx, cy = start
             continue
         if cmd in ("M", "m"):
+            if i + 1 >= n:                     # trailing/partial pair: stop cleanly
+                break
             x, y = nextf(), float(toks[i + 1]); i += 2
             if cmd == "m":
                 x += cx; y += cy
@@ -71,6 +73,8 @@ def _subpaths(d):
             cx, cy, start = x, y, (x, y)
             cmd = "l" if cmd == "m" else "L"   # implicit lineto after moveto
         elif cmd in ("L", "l"):
+            if i + 1 >= n:
+                break
             x, y = nextf(), float(toks[i + 1]); i += 2
             if cmd == "l":
                 x += cx; y += cy
@@ -110,9 +114,18 @@ def _viewbox(svg):
             float(hm.group(1)) if hm else 600.0]
 
 
-def _content(svg, minx, miny, h):
+def _unit_scale(svg):
+    """PDF units are points (1/72"). If the SVG page is declared in mm (our
+    paper-reframed export), scale coordinates + page mm->points; otherwise 1:1."""
+    m = re.search(r'\bwidth="[\d.]+(mm|cm|in)"', svg)
+    if not m:
+        return 1.0
+    return {"mm": 72.0 / 25.4, "cm": 72.0 / 2.54, "in": 72.0}[m.group(1)]
+
+
+def _content(svg, minx, miny, h, s=1.0):
     """PDF content stream: fill each path's subpaths. SVG y is top-down, PDF y is
-    bottom-up, so flip; translate by the viewBox origin."""
+    bottom-up, so flip; translate by the viewBox origin; scale by `s` (unit->points)."""
     out = []
     for d, fill in _paths(svg):
         if fill == "none":
@@ -124,9 +137,9 @@ def _content(svg, minx, miny, h):
         out.append("%.4f %.4f %.4f rg" % (r, g, b))
         for sub in subs:
             x0, y0 = sub[0]
-            out.append("%.3f %.3f m" % (x0 - minx, h - (y0 - miny)))
+            out.append("%.3f %.3f m" % ((x0 - minx) * s, (h - (y0 - miny)) * s))
             for x, y in sub[1:]:
-                out.append("%.3f %.3f l" % (x - minx, h - (y - miny)))
+                out.append("%.3f %.3f l" % ((x - minx) * s, (h - (y - miny)) * s))
             out.append("h")
         out.append("f")                       # nonzero fill (matches SVG default)
     return "\n".join(out)
@@ -135,13 +148,14 @@ def _content(svg, minx, miny, h):
 def svg_to_pdf(svg_text):
     """Convert a Grease-Pencil-exported SVG string to PDF bytes."""
     minx, miny, w, h = _viewbox(svg_text)
-    content = _content(svg_text, minx, miny, h).encode("ascii")
+    s = _unit_scale(svg_text)
+    content = _content(svg_text, minx, miny, h, s).encode("ascii")
 
     objs = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         ("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.3f %.3f] "
-         "/Contents 4 0 R >>" % (w, h)).encode("ascii"),
+         "/Contents 4 0 R >>" % (w * s, h * s)).encode("ascii"),
         b"<< /Length " + str(len(content)).encode("ascii") + b" >>\nstream\n"
         + content + b"\nendstream",
     ]

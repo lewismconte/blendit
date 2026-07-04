@@ -1666,8 +1666,13 @@ def _do_export_vector(fmt):
         return
     _enter_frame()                       # WYSIWYG: the export frame == what you see
     out = _next_vector_path(fmt)
+    paper = None                         # a drawing exports true-scale on its sheet
+    st = getattr(bpy.context.scene, "bir", None)
+    if st is not None and _is_drawing_camera():
+        w_mm, h_mm = _paper_dims_mm(st)
+        paper = {"w_mm": float(w_mm), "h_mm": float(h_mm)}
     try:
-        path = vector_export.export_vector(out, fmt)
+        path = vector_export.export_vector(out, fmt, paper=paper)
     except Exception as ex:
         _STATUS = "Vector export failed: %s" % ex
         print("Blendit: vector export failed: %s" % ex)

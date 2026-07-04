@@ -43,7 +43,8 @@ locking your work in.
   sized to real **paper** (A0–A4, Letter, Tabloid) at print DPI, with a section-cut
   slider. Pair them with the drawing looks and export as PNG or vector.
 - ✏️ **Vector export (SVG / PDF)** — any line style exports as true, editable vector
-  paths for Illustrator, Inkscape or CAD — not a pixel image.
+  paths for Illustrator, Inkscape or CAD — not a pixel image. 2D drawings export
+  **to scale on a real paper-sized page** (A2 at 1:50 is A2 at 1:50).
 - 🛬 **Compose your shot** — an interactive review session where you fly around, frame
   the view, straighten your verticals (two-point) or switch to orthographic, tweak the
   light, and snap a capture — all without touching Revit again.

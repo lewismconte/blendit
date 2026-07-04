@@ -8,7 +8,9 @@ projection via world_to_camera_view, then the interactive plumbing
 (live._pose_drawing) so a paper size + scale really reach the render camera.
 """
 import os
+import re
 import sys
+import tempfile
 
 import bpy
 import mathutils
@@ -185,6 +187,55 @@ def main():
     assert abs(cam3.data.ortho_scale - os0) < 1e-5, "snap RESCALED the drawing frame"
     assert abs(cam3.data.clip_start - cs0) < 1e-5, "snap MOVED the section cut"
     print("export/capture guard: drawing pose + scale + cut survive the snap OK")
+
+    # --- vector export is true-scale, un-stretched, paper-sized (SVG + PDF) --------
+    from blender.pipeline import vector_export, npr
+    build_scene(_FIX, overrides={"mode": "pen", "engine": "EEVEE",
+                                 "camera_type": "perspective"})
+    sc = bpy.context.scene
+    PW, PH, D = 594.0, 420.0, 50.0            # A2 landscape, 1:50
+    sc.render.resolution_x = int(round(PW / 25.4 * 150))
+    sc.render.resolution_y = int(round(PH / 25.4 * 150))
+    co = sc.camera
+    cam_mod.frame_ortho_drawing(co, "plan", ortho_scale=PW / 1000.0 * D,
+                                aspect=sc.render.resolution_x / float(sc.render.resolution_y))
+    cam_mod.apply_section_cut(co, 0.0)
+    npr.unbake_line_art(); npr.refresh_line_art(); npr.bake_line_art()
+    q = co.matrix_world.to_quaternion()
+    R = q @ mathutils.Vector((1, 0, 0))
+    Uu = q @ mathutils.Vector((0, 1, 0))
+    Pp = co.matrix_world.translation
+    us, wsv = [], []
+    for o in sc.objects:
+        if o.type != "MESH" or o.name == "BIR_Ground":
+            continue
+        for v in o.data.vertices:
+            p = o.matrix_world @ v.co
+            us.append((p - Pp).dot(R))
+            wsv.append((p - Pp).dot(Uu))
+    Wx, Wy = max(us) - min(us), max(wsv) - min(wsv)
+    dd = tempfile.mkdtemp(prefix="blendit_vec_")
+    svgp = vector_export.export_vector(os.path.join(dd, "p.svg"), "svg",
+                                       paper={"w_mm": PW, "h_mm": PH})
+    txt = open(svgp).read()
+    assert 'viewBox="0 0 594 420"' in txt, "SVG page not paper-sized"
+    assert 'width="594mm"' in txt and 'height="420mm"' in txt, "SVG missing mm page size"
+    nums = re.findall(r"[ML] (-?\d*\.?\d+) (-?\d*\.?\d+)", txt)
+    xs = [float(a) for a, _b in nums]
+    ys = [float(_b) for _a, _b in nums]
+    cw, ch = max(xs) - min(xs), max(ys) - min(ys)
+    assert abs(cw - Wx * 1000.0 / D) < 0.5, "SVG width not true-scale (%.2f vs %.2f)" % (
+        cw, Wx * 1000.0 / D)
+    assert abs(ch - Wy * 1000.0 / D) < 0.5, "SVG height not true-scale"
+    assert abs(cw / ch - Wx / Wy) < 0.01, "SVG proportions distorted (stretch not fixed)"
+    assert min(xs) >= -0.5 and max(xs) <= PW + 0.5, "content off the page"
+    pdfp = vector_export.export_vector(os.path.join(dd, "p.pdf"), "pdf",
+                                       paper={"w_mm": PW, "h_mm": PH})
+    mb = re.search(r"/MediaBox \[([-\d. ]+)\]", open(pdfp, "rb").read().decode("latin1"))
+    mm = [float(x) for x in mb.group(1).split()]
+    assert abs(mm[2] / 72.0 * 25.4 - PW) < 0.5 and abs(mm[3] / 72.0 * 25.4 - PH) < 0.5, (
+        "PDF page not physically A2")
+    print("vector export: true-scale 60.96x91.44mm @1:50, un-stretched, A2 page (SVG+PDF) OK")
 
     print("DRAWING OK")
 
