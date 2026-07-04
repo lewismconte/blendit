@@ -879,6 +879,10 @@ def _update_drawing_cut(self, context):
     _redraw_all()
 
 
+def _update_drawing_guide(self, context):
+    _redraw_all()
+
+
 class BIR_Settings(bpy.types.PropertyGroup):
     mode: bpy.props.EnumProperty(name="Mode", items=_MODE_ITEMS,
                                  default="realistic", update=_update_mode)
@@ -1060,6 +1064,12 @@ class BIR_Settings(bpy.types.PropertyGroup):
         name="Cut Position", default=0.5, min=0.0, max=1.0, subtype="FACTOR",
         description="Where the cut plane sits, from the near face (0) to the far "
                     "face (1) along the view", update=_update_drawing_cut)
+    drawing_guide: bpy.props.BoolProperty(
+        name="Show Sheet Guide", default=True,
+        description="Outline the paper sheet in the viewport (the orthographic frame "
+                    "at the chosen scale) with a size / scale label - the drawing "
+                    "equivalent of Frame View's passepartout",
+        update=_update_drawing_guide)
     drawing_last: bpy.props.StringProperty(default="", options={"HIDDEN"})
 
 
@@ -2089,6 +2099,7 @@ class BIR_PT_drawing(_Sub, bpy.types.Panel):
         layout.label(text="Sheet: %d x %d px" %
                      (sc.render.resolution_x, sc.render.resolution_y),
                      icon="IMAGE_DATA")
+        layout.prop(st, "drawing_guide", toggle=True, icon="MESH_PLANE")
         layout.separator()
         exp = layout.row(align=True)
         exp.scale_y = 1.2
@@ -2505,7 +2516,71 @@ def _draw_busy(fid, w, h):
     blf.draw(fid, label)
 
 
+def _draw_sheet_guide():
+    """Outline the paper sheet in the viewport - the orthographic camera frame is the
+    sheet at the chosen scale - with a size/scale label. The drawing equivalent of
+    Frame View's passepartout; shows whenever the export camera is ortho and the
+    guide toggle is on (posed drawings AND loaded 2D views). Fully guarded so a GPU /
+    projection hiccup can never break the viewport draw."""
+    st = getattr(bpy.context.scene, "bir", None)
+    if st is None or not getattr(st, "drawing_guide", False):
+        return
+    cam = bpy.context.scene.camera
+    if cam is None or cam.data.type != "ORTHO":
+        return
+    region = bpy.context.region
+    rv3d = bpy.context.region_data
+    if region is None or rv3d is None:
+        return
+    try:
+        import gpu
+        from gpu_extras.batch import batch_for_shader
+        from bpy_extras.view3d_utils import location_3d_to_region_2d
+    except Exception:
+        return
+    try:
+        mw = cam.matrix_world
+        pts = []
+        for corner in cam.data.view_frame(scene=bpy.context.scene):
+            p = location_3d_to_region_2d(region, rv3d, mw @ corner)
+            if p is None:
+                return
+            pts.append((p.x, p.y, 0.0))   # UNIFORM_COLOR is a vec3-pos shader
+        shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+        gpu.state.blend_set("ALPHA")
+        gpu.state.line_width_set(1.8)
+        batch = batch_for_shader(shader, "LINE_LOOP", {"pos": pts})
+        shader.bind()
+        shader.uniform_float("color", (0.98, 0.93, 0.78, 0.95))   # warm paper edge
+        batch.draw(shader)
+        gpu.state.line_width_set(1.0)
+        gpu.state.blend_set("NONE")
+    except Exception:
+        return
+    if blf is None:
+        return
+    try:                                    # a mini title-block label at the corner
+        min_x = min(p[0] for p in pts)
+        min_y = min(p[1] for p in pts)
+        sc = bpy.context.scene
+        orient = "Landscape" if st.drawing_orient == "LANDSCAPE" else "Portrait"
+        label = "%s  %s  %s   %d x %d px" % (
+            st.drawing_paper, orient, st.drawing_scale,
+            sc.render.resolution_x, sc.render.resolution_y)
+        fid = 0
+        _blf_size(fid, 13)
+        blf.color(fid, 0.98, 0.93, 0.78, 0.95)
+        blf.position(fid, min_x + 6, min_y + 8, 0)
+        blf.draw(fid, label)
+    except Exception:
+        pass
+
+
 def _draw_hud():
+    try:
+        _draw_sheet_guide()               # sheet outline: both Fly and Build modes
+    except Exception:
+        pass
     if blf is None:
         return
     try:
