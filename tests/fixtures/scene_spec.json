@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.1.0",
+  "contract_version": "0.2.0",
   "source": {
     "app": "Fixture",
     "app_version": "0",
@@ -59,7 +59,10 @@
       "transparency": 0.0,
       "ior": 1.45,
       "emissive": null,
-      "emissive_strength": 0.0
+      "emissive_strength": 0.0,
+      "appearance_class": "",
+      "glossiness": null,
+      "maps": null
     },
     {
       "id": "mat_glass",
@@ -74,7 +77,10 @@
       "transparency": 0.9,
       "ior": 1.52,
       "emissive": null,
-      "emissive_strength": 0.0
+      "emissive_strength": 0.0,
+      "appearance_class": "",
+      "glossiness": null,
+      "maps": null
     }
   ],
   "camera": {

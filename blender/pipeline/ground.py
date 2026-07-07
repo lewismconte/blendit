@@ -14,6 +14,12 @@ _GROUND_NAME = "BIR_Ground"
 
 
 def add_ground(spec=None):
+    # A model that brings its OWN site (a site link / toposolid - the Revit side
+    # sets world.has_site) needs no artificial ground: a flat plane would
+    # z-fight the real terrain and read as a flood plane on any sloped site.
+    if spec is not None and (spec.get("world") or {}).get("has_site"):
+        _remove_existing()
+        return None
     bb = _scene_bbox()
     if bb is None:
         return None

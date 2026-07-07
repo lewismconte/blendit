@@ -4,13 +4,14 @@ Contract 0.1.0 numeric mapping (base_color, metallic, roughness, transparency,
 ior, emissive) drives the Principled BSDF. Transparency routes to physical
 transmission (glass), not flat alpha.
 
-SURFACE TEXTURE comes from `material_library`: opaque materials are matched on the
-Revit material *name* to a curated procedural surface (brick / wood / concrete /
-...), tinted by the Revit base colour. This is the "curated library" path - it
-needs no contract change and no UVs (Revit carries neither textures nor UVs
-cleanly; see material_library.py). If the record ever carries an explicit
-`base_color_texture` (the future Revit appearance-asset extraction path, contract
-0.2.0), that takes precedence over the library.
+SURFACE TEXTURE, in precedence order:
+  1. an explicit per-material override from the N-panel ("plain" or a library key),
+  2. REAL Revit textures - the record's `maps` block (contract 0.2.0: the
+     appearance-asset bitmaps bundled under textures/), box-projected at their
+     real-world scale on Object coordinates (== world metres; Revit gives no UVs,
+     and real-world box mapping is exactly how Revit maps them itself),
+  3. the curated `material_library` surface matched on the Revit material *name*,
+     tinted by the Revit base colour.
 
 The richer category-aware mapping from the brief's Appendix D (mirror / water
 distinct, Bevel edge highlights) keys off a deferred `appearance_class` field.
@@ -64,10 +65,11 @@ def _rgba(rgb, a=1.0):
     return (float(rgb[0]), float(rgb[1]), float(rgb[2]), float(a))
 
 
-def build_material(rec, engine="CYCLES", surface="auto"):
-    """`surface` selects the texture source: "auto" matches the library by the Revit
-    material name (the default), "plain" forces flat colour, any other value forces
-    that specific library surface (the N-panel override)."""
+def build_material(rec, engine="CYCLES", surface="auto", base_dir=None):
+    """`surface` selects the texture source: "auto" prefers the record's real Revit
+    maps (falling back to the name-matched library), "plain" forces flat colour, any
+    other value forces that specific library surface (the N-panel override).
+    `base_dir` is the bundle dir map uris resolve against."""
     mat = bpy.data.materials.new(rec.get("name") or rec.get("id") or "RevitMaterial")
     mat.use_nodes = True
     nt = mat.node_tree
@@ -92,16 +94,14 @@ def build_material(rec, engine="CYCLES", surface="auto"):
         _setup_eevee_glass(mat, engine)
     else:
         bsdf.inputs["Roughness"].default_value = roughness
-        # Curated procedural surface, tinted by the Revit base colour. "auto" matches
-        # the library by name (falling back to flat colour); an explicit surface key
-        # forces that one; "plain" leaves the flat colour. An explicit
-        # base_color_texture (future Revit-extraction path) always wins.
+        # Texture source (precedence in the module docstring): explicit override >
+        # real Revit maps > name-matched library > flat colour.
         tint = rec.get("base_color", [0.8, 0.8, 0.8])
-        if rec.get("base_color_texture") or surface == "plain":
+        if surface == "plain":
             pass
         elif surface and surface != "auto":
             material_library.build_surface(nt, bsdf, surface, tint, roughness)
-        else:
+        elif not _build_revit_maps(nt, bsdf, rec, base_dir):
             material_library.decorate(nt, bsdf, rec.get("name", ""), tint, roughness)
 
     emissive = rec.get("emissive")
@@ -110,6 +110,77 @@ def build_material(rec, engine="CYCLES", surface="auto"):
         bsdf.inputs["Emission Strength"].default_value = float(
             rec.get("emissive_strength") or 1.0)
     return mat
+
+
+def _map_path(entry, base_dir):
+    uri = (entry or {}).get("uri")
+    if not uri or not base_dir:
+        return None
+    path = os.path.join(base_dir, uri.replace("/", os.sep))
+    return path if os.path.isfile(path) else None
+
+
+def _build_revit_maps(nt, bsdf, rec, base_dir):
+    """Real Revit appearance textures (contract 0.2.0 `maps`): the diffuse bitmap
+    box-projected at its real-world scale, plus the bump map when present. Returns
+    False when there's no resolvable diffuse map, so the caller can fall back to
+    the curated library. Object coords == world metres (merge bakes the matrix),
+    so a 0.6 m brick tile is 0.6 m on the wall - the same real-world mapping
+    Revit uses, no UVs needed."""
+    maps = rec.get("maps") or {}
+    diffuse = maps.get("diffuse") or {}
+    dpath = _map_path(diffuse, base_dir)
+    if dpath is None:
+        return False
+
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    tc.location = (-900, 0)
+    mp = nt.nodes.new("ShaderNodeMapping")
+    mp.location = (-700, 0)
+    nt.links.new(tc.outputs["Object"], mp.inputs["Vector"])
+    sx, sy = _scale_m(diffuse)
+    # Box projection samples the XY/XZ/YZ planes: walls read U from world X or Y
+    # and V from Z. 1/sx on both horizontals + 1/sy on Z keeps every wall's tile
+    # sx wide and sy tall (floors get sx x sx - square tiles, the common case).
+    mp.inputs["Scale"].default_value = (1.0 / sx, 1.0 / sx, 1.0 / sy)
+    off = diffuse.get("offset_m") or [0.0, 0.0]
+    mp.inputs["Location"].default_value = (float(off[0]), float(off[1]), 0.0)
+    rot = float(diffuse.get("rotation_deg") or 0.0)
+    if rot:
+        import math
+        mp.inputs["Rotation"].default_value = (0.0, 0.0, math.radians(rot))
+
+    img = nt.nodes.new("ShaderNodeTexImage")
+    img.location = (-460, 60)
+    img.image = bpy.data.images.load(dpath, check_existing=True)
+    img.projection = "BOX"
+    img.projection_blend = 0.25
+    nt.links.new(mp.outputs["Vector"], img.inputs["Vector"])
+    nt.links.new(img.outputs["Color"], bsdf.inputs["Base Color"])
+
+    bpath = _map_path(maps.get("bump"), base_dir)
+    if bpath is not None:
+        bimg = nt.nodes.new("ShaderNodeTexImage")
+        bimg.location = (-460, -280)
+        bimg.image = bpy.data.images.load(bpath, check_existing=True)
+        bimg.image.colorspace_settings.name = "Non-Color"
+        bimg.projection = "BOX"
+        bimg.projection_blend = 0.25
+        nt.links.new(mp.outputs["Vector"], bimg.inputs["Vector"])
+        bump = nt.nodes.new("ShaderNodeBump")
+        bump.location = (-200, -280)
+        amount = float((maps.get("bump") or {}).get("amount") or 0.3)
+        bump.inputs["Strength"].default_value = max(0.0, min(1.0, amount))
+        nt.links.new(bimg.outputs["Color"], bump.inputs["Height"])
+        nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    return True
+
+
+def _scale_m(entry):
+    scale = entry.get("scale_m") or [0.3, 0.3]
+    sx = max(1e-4, float(scale[0]))
+    sy = max(1e-4, float(scale[1] if len(scale) > 1 else scale[0]))
+    return sx, sy
 
 
 def _setup_eevee_glass(mat, engine):
@@ -127,7 +198,9 @@ def _setup_eevee_glass(mat, engine):
 
 def apply_materials(loaded, engine="CYCLES"):
     overrides = _overrides_for(loaded.spec)
-    by_id = {rec["id"]: build_material(rec, engine, overrides.get(rec["id"], "auto"))
+    base_dir = (loaded.spec or {}).get("_override_dir")  # == the bundle dir
+    by_id = {rec["id"]: build_material(rec, engine, overrides.get(rec["id"], "auto"),
+                                       base_dir=base_dir)
              for rec in loaded.spec.get("materials", [])}
     elems = {e["node"]: e
              for e in loaded.spec.get("geometry", {}).get("elements", [])}

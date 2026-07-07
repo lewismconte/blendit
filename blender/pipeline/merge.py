@@ -62,7 +62,33 @@ def merge_by_material(loaded):
     if new_node_to_object:                 # never wipe the scene on a merge failure
         loaded.node_to_object = new_node_to_object
         spec.setdefault("geometry", {})["elements"] = new_elements
+    try:
+        # obj.bound_box is lazy; _bake_transform mutates meshes in place, and the
+        # camera framing reads bound_box right after - refresh or it frames the
+        # stale pre-bake bounds.
+        bpy.context.view_layer.update()
+    except Exception:
+        pass
     return loaded
+
+
+def _bake_transform(obj):
+    """Bake the object's world transform into its vertices (identity transform
+    after). The multi-object path below gets this for free via tmp.transform();
+    the single-object rename shortcut MUST do it too, or its Object texture
+    coordinates stay in Revit feet while every other merged object's are world
+    metres - real-world-scale textures (library + Revit maps) would tile 3.28x
+    too small on exactly the materials that appear on one element."""
+    try:
+        import mathutils
+        if obj.matrix_world == mathutils.Matrix.Identity(4):
+            return
+        if obj.data.users > 1:              # never mutate a shared mesh
+            obj.data = obj.data.copy()
+        obj.data.transform(obj.matrix_world)
+        obj.matrix_world = mathutils.Matrix.Identity(4)
+    except Exception:
+        pass
 
 
 def _merge_group(obj_list, mid):
@@ -75,8 +101,10 @@ def _merge_group(obj_list, mid):
     name = MERGED_PREFIX + str(mid)
 
     if len(obj_list) == 1:                  # nothing to combine; rename in place
-        obj_list[0].name = name
-        return obj_list[0]
+        o = obj_list[0]
+        o.name = name
+        _bake_transform(o)                  # keep the Object==metres invariant
+        return o
 
     src_mat = None
     for o in obj_list:

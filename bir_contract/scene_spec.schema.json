@@ -76,7 +76,32 @@
         "transparency": { "type": "number", "minimum": 0, "maximum": 1 },
         "ior": { "type": "number" },
         "emissive": { "oneOf": [{ "$ref": "#/$defs/rgb" }, { "type": "null" }] },
-        "emissive_strength": { "type": "number" }
+        "emissive_strength": { "type": "number" },
+        "appearance_class": { "type": "string" },
+        "glossiness": { "oneOf": [{ "type": "number", "minimum": 0, "maximum": 1 }, { "type": "null" }] },
+        "maps": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "diffuse": { "$ref": "#/$defs/texture_map" },
+                "bump": { "$ref": "#/$defs/texture_map" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "texture_map": {
+      "type": "object",
+      "required": ["uri"],
+      "properties": {
+        "uri": { "type": "string" },
+        "scale_m": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "offset_m": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "rotation_deg": { "type": "number" },
+        "amount": { "type": "number" }
       }
     },
     "camera": {
@@ -125,14 +150,15 @@
         "sky_type": { "type": "string", "enum": ["nishita", "hdri", "solid"] },
         "hdri_uri": { "type": ["string", "null"] },
         "strength": { "type": "number" },
-        "ground_albedo": { "$ref": "#/$defs/rgb" }
+        "ground_albedo": { "$ref": "#/$defs/rgb" },
+        "has_site": { "type": "boolean" }
       }
     },
     "render": {
       "type": "object",
       "required": ["mode", "engine"],
       "properties": {
-        "mode": { "type": "string", "enum": ["realistic", "white", "shadow", "linework", "specular", "pen", "sketch", "cel", "hatch", "yellowtrace", "kraft", "blueprint"] },
+        "mode": { "type": "string", "enum": ["realistic", "white", "shadow", "linework", "specular", "pen", "sketch", "cel", "hatch", "yellowtrace", "kraft", "blueprint", "diagram", "watercolor", "risograph"] },
         "engine": { "type": "string", "enum": ["CYCLES", "EEVEE"] },
         "resolution": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
         "samples": { "type": "integer" },

@@ -6,6 +6,17 @@ these work from a lib module (the builtin is only injected into the script scope
 """
 
 
+def dismiss_output(seconds=8):
+    """Auto-close this command's pyRevit output window after `seconds` - the
+    info reports shouldn't need manual dismissal. Call it LAST in a button
+    script (the countdown starts immediately). No-op without pyRevit."""
+    try:
+        from pyrevit import script
+        script.get_output().self_destruct(int(seconds))
+    except Exception:
+        pass
+
+
 def report(msg):
     """Print markdown to the pyRevit output window (falls back to stdout)."""
     try:
@@ -109,16 +120,62 @@ def ensure_blender(cfg, report=None):
     return None
 
 
+def pick_loaded_view(doc, slots, message):
+    """Offer the loaded-views list (newest first, with per-slot staleness) and
+    return the chosen slot dict, or None (cancel / no pyRevit)."""
+    import bir_export
+    try:
+        from pyrevit import forms
+    except Exception:
+        return None
+    labels = []
+    by_label = {}
+    _cache_words = {"ready": "scene ready", "building": "scene building...",
+                    "none": "scene not built"}
+    for slot in slots:
+        kind = slot.get("view_kind") or ""
+        try:
+            reason = bir_export.slot_staleness(doc, slot)
+        except Exception:
+            reason = None
+        status = ("  --  out of date: %s" % reason) if reason else ""
+        try:
+            cache_word = _cache_words[bir_export.cache_state(slot["blend_path"])]
+        except Exception:
+            cache_word = ""
+        label = "%s%s  (loaded %s%s)%s" % (
+            slot["view_name"], ("  [%s]" % kind) if kind else "",
+            slot.get("loaded_at") or "?",
+            (", %s" % cache_word) if cache_word else "", status)
+        labels.append(label)
+        by_label[label] = slot
+    picked = forms.SelectFromList.show(labels,
+                                       title="Blendit - %s" % message,
+                                       button_name="Select", multiselect=False)
+    if not picked:
+        return None
+    return by_label.get(picked)
+
+
 def require_loaded(doc):
-    """-> (bundle_ref, blend_path) if a view is already loaded (cached) for this
-    document, else show an alert telling the user to Load View first and return
-    (None, None).
+    """-> (bundle_ref, blend_path) if the ACTIVE view is already loaded (cached),
+    else offer the list of other loaded views, else tell the user to Load View
+    first and return (None, None).
 
     Open View / Render Loaded consume a loaded view; loading (the slow Revit
     extraction) is the explicit, clearly-labelled Load View step - nothing else
     surprises the user with a long operation."""
     import bir_export
     bundle_ref, blend_path = bir_export.cached_bundle(doc)
+    if bundle_ref is None:
+        # The active view isn't loaded - other views might be.
+        slots = bir_export.loaded_views(doc)
+        if slots:
+            slot = pick_loaded_view(
+                doc, slots, "The active view isn't loaded - pick a loaded view:")
+            if slot is not None:
+                return slot["bundle_ref"], slot["blend_path"]
+            return None, None
     if bundle_ref is not None:
         # Soft staleness check: warn (never block) when the model looks different
         # from what Load View extracted - the "why is my new wall missing?" fix.
@@ -182,12 +239,116 @@ def ensure_loadable_view(doc, report=None):
 ensure_3d_view = ensure_loadable_view
 
 
-def launch_headless_render(cfg, report, banner="Render Loaded"):
+def launch_cache_build(cfg, bundle_ref, blend_path):
+    """Start the DETACHED, windowless background build of the fast-open .blend
+    cache (import + merge are the slow part of Open View - do them while the
+    user is still in Revit). Silent best-effort: no Blender configured, or a
+    cache already present, just means Open View behaves as before. Returns
+    True when a build was started."""
+    import os
+    import subprocess
+    import bir_bootstrap
+
+    if os.path.isfile(blend_path):
+        return False                        # cache already exists
+    blender = cfg.get("blender_exe") or bir_bootstrap.find_blender_exe()
+    if not blender or not os.path.isfile(blender):
+        return False                        # no popups here - Open View prompts
+    cmd = [blender, "--background", "--python",
+           bir_bootstrap.prepare_cache_script_path(), "--",
+           "--bundle", bundle_ref, "--save-blend", blend_path]
+    try:
+        # Sentinel FIRST: Open View + the Views list read it to say
+        # "scene building..." (prepare_cache removes it when done).
+        try:
+            f = open(blend_path + ".busy", "w")
+            f.write("building")
+            f.close()
+        except Exception:
+            pass
+        logf = open(os.path.join(os.path.dirname(blend_path),
+                                 "cache_build.log"), "wb")
+        try:
+            try:
+                subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
+                                 creationflags=0x08000000)  # CREATE_NO_WINDOW
+            except (TypeError, ValueError):
+                subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
+        finally:
+            logf.close()
+        return True
+    except Exception:
+        try:
+            os.remove(blend_path + ".busy")
+        except Exception:
+            pass
+        return False
+
+
+def launch_open_view(cfg, report, bundle_ref, blend_path):
+    """Launch the interactive Open View session for a loaded bundle (shared by
+    the Open View button and the Views list). Returns True when launched."""
+    import os
+    import subprocess
+    import bir_bootstrap
+
+    blender = ensure_blender(cfg, report)
+    if not blender:
+        return False
+    live_py = bir_bootstrap.live_script_path()
+    cap_dir = cfg.get("output_dir") or bir_bootstrap.default_output_dir()
+    # Force EEVEE for a responsive realtime viewport. --save-blend builds/refreshes
+    # the fast-open cache; --blend opens it directly when it already exists.
+    # Open in White/Clay (fast, robust for composing) - switch modes live from
+    # the N-panel. The render-mode config drives Render Loaded finals.
+    # blender-launcher.exe = no black console window alongside the app.
+    cmd = [bir_bootstrap.windowed_blender_exe(blender), "--python", live_py, "--",
+           "--bundle", bundle_ref, "--save-blend", blend_path,
+           "--capture-dir", cap_dir,
+           "--engine", "EEVEE", "--mode", "white"]
+    import bir_export
+    state = bir_export.cache_state(blend_path)
+    if state == "building":
+        # The background build from Load View is still running - opening now
+        # means a slow fresh import. Let the user choose.
+        try:
+            from pyrevit import forms
+            choice = forms.alert(
+                "The fast-open scene is still being prepared in the "
+                "background.\n\nWait a few minutes and Open View will be "
+                "quick - or open now with a fresh import (slower; Blender "
+                "may say 'Not Responding' while it works).",
+                title="Blendit - scene cache still building",
+                options=["Open now (fresh import)", "Cancel - I'll wait"])
+            if choice != "Open now (fresh import)":
+                return False
+        except Exception:
+            pass
+    if os.path.isfile(blend_path):
+        cmd += ["--blend", blend_path]
+        report("**Blendit** - opening the loaded view (fast: cached scene)")
+    else:
+        report("**Blendit** - opening the loaded view (first open builds the "
+               "fast-open cache - big multi-link models can take a few minutes; "
+               "the Blender window may say 'Not Responding' while it works)")
+    report("- launching Blender... Navigate to compose, **Enter** to capture, "
+           "**F10** for the full Blender interface.")
+    try:
+        # Detached: do NOT wait. Blender stays open; Revit is not blocked.
+        subprocess.Popen(cmd)
+        return True
+    except OSError as ex:
+        report("**ERROR** launching Blender: %s\n\n"
+               "Set the Blender path in Settings (or BLENDIT_BLENDER_EXE)." % ex)
+        return False
+
+
+def launch_headless_render(cfg, report, banner="Render Loaded", bundle_ref=None):
     """The Render Loaded launch, shared with its Shift+Click 'at Final
-    quality' variant: pre-flight Blender, require a loaded view, then start
-    a DETACHED headless render of the cached bundle with cfg's settings as
-    CLI overrides (the bundle is a pure geometry cache). Returns True when a
-    render was launched."""
+    quality' variant and the Views list: pre-flight Blender, require a loaded
+    view (or take an explicit `bundle_ref`), then start a DETACHED headless
+    render of the cached bundle with cfg's settings as CLI overrides (the
+    bundle is a pure geometry cache). Returns True when a render was launched."""
     import os
     import subprocess
     import bir_bootstrap
@@ -196,8 +357,9 @@ def launch_headless_render(cfg, report, banner="Render Loaded"):
     blender = ensure_blender(cfg, report)
     if not blender:
         return False
-    doc = active_doc()
-    bundle_ref, _blend = require_loaded(doc)    # error popup if not loaded
+    if bundle_ref is None:
+        doc = active_doc()
+        bundle_ref, _blend = require_loaded(doc)    # error popup if not loaded
     if bundle_ref is None:
         return False
 
@@ -228,7 +390,13 @@ def launch_headless_render(cfg, report, banner="Render Loaded"):
     try:
         logf = open(log_path, "wb")
         try:
-            subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
+            # CREATE_NO_WINDOW: a headless render needs no console flashing up;
+            # its output already goes to the log file.
+            try:
+                subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
+                                 creationflags=0x08000000)
+            except (TypeError, ValueError):
+                subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
         finally:
             logf.close()      # the child holds its own handle; don't leak ours
     except OSError as ex:

@@ -1,6 +1,6 @@
 """Yellowtrace - the concept sketch on yellow trace paper (butter paper):
-warm canary ground, loose dark-sepia lines with wobble AND corner overshoot.
-The overlay architects actually sketch on. Renders under EEVEE."""
+warm canary ground with crisp BLACK ink over it. The classic tracing-paper
+overlay - clean black linework, only a whisper of hand wobble. Renders under EEVEE."""
 from .registry import register_preset
 from . import _helpers
 from .. import npr
@@ -15,11 +15,11 @@ def apply(loaded, spec):
     override_all(loaded, npr.make_flat_material((0.96, 0.77, 0.36), "BIR_Trace"))
     npr.set_world_flat((1.0, 0.84, 0.44), 1.0)
     npr.hide_ground()
-    npr.setup_line_art(radius=npr.default_line_radius() * 1.1,
-                       color=(0.16, 0.10, 0.05), crease_deg=62.0,
+    npr.setup_line_art(radius=npr.default_line_radius() * 1.05,
+                       color=(0.0, 0.0, 0.0), crease_deg=62.0,
                        thickness_factor=1.0)
-    npr.set_sketchiness(0.5)         # looser than Sketch's paper drawing
-    npr.set_line_overshoot(0.16)     # trace sketches overdraw generously
+    npr.set_sketchiness(0.12)        # just a whisper of wobble - keep it crisp
+    npr.set_line_overshoot(0.04)     # barely any overdraw
 
 
 register_preset("yellowtrace", apply)

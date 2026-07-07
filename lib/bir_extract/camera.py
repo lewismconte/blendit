@@ -1,9 +1,14 @@
 """Active view camera -> contract `camera` dict (feet, Z-up).
 
-3D views: position + look direction come straight from the view orientation (the
-important part); the focal point is placed along the forward direction at the
-distance to the view's bounding-box centre. Exact perspective FOV isn't cleanly
-exposed by the Revit API, so we use a sane architectural default for now.
+3D views: the pose (eye + look direction + up) comes straight from the view
+orientation and is marked frame="view" so the Blender side reproduces the
+COMPOSED SHOT exactly instead of auto-fitting the model. The perspective FOV
+comes from the crop box: the crop rectangle sits on the front plane at distance
+|CropBox.Max.Z| from the eye, so fov = 2*atan(Max.X / |Max.Z|). (Only the Max
+corner is front-plane-true - the API projects Min onto the BACK clip plane - so
+this assumes a symmetric crop, which is what Revit's camera tool creates.)
+Orthographic 3D views frame to their crop width. Anything unreadable falls back
+to frame="fit" (the old auto-fit).
 
 2D views (plan / section / elevation): an ORTHOGRAPHIC camera looking along
 -ViewDirection, framed to the crop rectangle (frame="crop", so Blender honours the
@@ -37,6 +42,8 @@ def extract_camera(view3d):
         # opt-in correction the user turns on in Open Model / Settings.
         "two_point_perspective": False,
     }
+    posed = False
+    fwd = up = None
     try:
         o = view3d.GetOrientation()
         eye, fwd, up = o.EyePosition, o.ForwardDirection, o.UpDirection
@@ -45,16 +52,98 @@ def extract_camera(view3d):
         cam["target"] = [eye.X + fwd.X * dist, eye.Y + fwd.Y * dist,
                          eye.Z + fwd.Z * dist]
         cam["up"] = [up.X, up.Y, up.Z]
+        posed = True
     except Exception:
         pass
 
     try:
         if not view3d.IsPerspective:
             cam["type"] = "orthographic"
-            cam["ortho_scale"] = _ortho_scale(view3d)
+            frame = _ortho3d_frame(view3d, fwd, up)
+            if posed and frame is not None:
+                width, asp = frame
+                cam["frame"] = "view"           # exact pose + crop width
+                cam["ortho_scale"] = width
+                if asp is not None:
+                    cam["crop_aspect"] = asp
+            else:
+                cam["ortho_scale"] = _ortho_scale(view3d)   # auto-fit fallback
+        elif posed:
+            cam["frame"] = "view"               # exact pose; frustum from the crop box
+            fov, asp, sx, sy = _perspective_frustum(view3d)
+            if fov is not None:
+                cam["fov_degrees"] = fov
+                cam["shift_x"] = sx             # the crop's asymmetry = lens shift
+                cam["shift_y"] = sy
+            if asp is not None:
+                cam["crop_aspect"] = asp
     except Exception:
         pass
     return cam
+
+
+def _perspective_frustum(view3d):
+    """(fov_degrees, aspect, shift_x, shift_y) for a perspective view, or
+    (None, None, None, None).
+
+    Read from GetCropRegionShapeManager().GetCropShape(): the crop loop in
+    WORLD coordinates, which nails the frustum with no unit guessing. (The raw
+    CropBox is a trap: verified with a RevitPythonShell probe on Revit 2025,
+    its X/Y rectangle lives on an undocumented plane unrelated to Max.Z - two
+    plausible-looking formulas were each wrong by 3-4x.) The crop rect is
+    usually ASYMMETRIC about the view axis (an eye-level camera crops far more
+    above the horizon than below): that asymmetry is a LENS SHIFT - drop it
+    and every render points too low. Shifts are Blender units: offset / frame
+    WIDTH (sensor_fit HORIZONTAL)."""
+    try:
+        import math
+        o = view3d.GetOrientation()
+        eye, fwd, up = o.EyePosition, o.ForwardDirection, o.UpDirection
+        right = fwd.CrossProduct(up)
+        loops = list(view3d.GetCropRegionShapeManager().GetCropShape())
+        if not loops:
+            return None, None, None, None
+        xs, ys, zs = [], [], []
+        for curve in loops[0]:
+            p = curve.GetEndPoint(0)
+            d = p.Subtract(eye)
+            xs.append(d.DotProduct(right))
+            ys.append(d.DotProduct(up))
+            zs.append(d.DotProduct(fwd))
+        zc = sum(zs) / len(zs)                  # the crop plane's distance
+        w = max(xs) - min(xs)
+        h = max(ys) - min(ys)
+        if zc < 1e-9 or w < 1e-9 or h < 1e-9:
+            return None, None, None, None
+        fov = 2.0 * math.degrees(math.atan((w / 2.0) / zc))
+        if not (5.0 <= fov <= 170.0):           # implausible -> keep the default
+            return None, None, None, None
+        cx = (max(xs) + min(xs)) / 2.0
+        cy = (max(ys) + min(ys)) / 2.0
+        return fov, w / h, cx / w, cy / w
+    except Exception:
+        return None, None, None, None
+
+
+def _ortho3d_frame(view3d, fwd, up):
+    """(width_along_right, aspect) for an orthographic 3D view: the active crop
+    rectangle when there is one, else the model bbox measured along the view
+    axes. None when the pose is unknown or nothing is measurable."""
+    if fwd is None or up is None:
+        return None
+    try:
+        frame = _crop_frame(view3d)             # parallel projection: crop is true
+        if frame is None:
+            right = fwd.CrossProduct(up)
+            frame = _bbox_frame(view3d, right, up, fwd.Negate())
+        if frame is None:
+            return None
+        _c, width, height, _d = frame
+        if not width or width < 1e-6:
+            return None
+        return float(width), _safe_aspect(width, height)
+    except Exception:
+        return None
 
 
 def _name(view3d):

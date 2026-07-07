@@ -37,6 +37,23 @@ def set_sun_energy(absolute):
         s.data.energy = float(absolute)
 
 
+def aim_sun(alt_deg, az_deg):
+    """Re-aim the key light to a chosen altitude/azimuth (matches world.py's
+    convention: +Y North, +X East). For stylised looks that want a flattering
+    raking key (e.g. riso, which needs a wide light->shade range to band cleanly)
+    rather than the site-accurate sun."""
+    import math
+    import mathutils
+    s = sun_object()
+    if s is None:
+        return
+    alt, az = math.radians(alt_deg), math.radians(az_deg)
+    to_sun = mathutils.Vector((math.cos(alt) * math.sin(az),
+                               math.cos(alt) * math.cos(az),
+                               math.sin(alt))).normalized()
+    s.rotation_euler = (-to_sun).to_track_quat("-Z", "Y").to_euler()
+
+
 def disable_freestyle():
     # NPR now uses Grease Pencil Line Art (live in the viewport); presets call this
     # defensively so a leftover Freestyle pass never doubles up on the outlines.
@@ -75,6 +92,47 @@ def set_neutral_world(value=0.85, strength=1.0):
     bg.inputs["Color"].default_value = (value, value, value, 1.0)
     bg.inputs["Strength"].default_value = float(strength)
     nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+
+
+def set_gradient_world(zenith=0.35, horizon=0.78, strength=1.0):
+    """A soft light-grey studio cyclorama: darker at the top, brighter toward the
+    horizon. Gives white/clay massing models a backdrop to separate against - the
+    model's top edges read against the darker zenith, its base against the bright
+    horizon - instead of vanishing into a flat grey field."""
+    w = bpy.context.scene.world
+    if w is None:
+        w = bpy.data.worlds.new("World")
+        bpy.context.scene.world = w
+    w.use_nodes = True
+    nt = w.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputWorld")
+    out.location = (400, 0)
+    bg = nt.nodes.new("ShaderNodeBackground")
+    bg.location = (200, 0)
+    bg.inputs["Strength"].default_value = float(strength)
+    nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    tc.location = (-600, 0)
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    sep.location = (-420, 0)
+    nt.links.new(tc.outputs["Generated"], sep.inputs["Vector"])
+    # Direction Z (-1..1) -> ramp position (0..1): 0.5 is the horizon.
+    remap = nt.nodes.new("ShaderNodeMath")
+    remap.operation = "MULTIPLY_ADD"
+    remap.location = (-260, 0)
+    remap.inputs[1].default_value = 0.5
+    remap.inputs[2].default_value = 0.5
+    nt.links.new(sep.outputs["Z"], remap.inputs[0])
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.location = (-80, 0)
+    ramp.color_ramp.interpolation = "EASE"
+    els = ramp.color_ramp.elements
+    els[0].position, els[0].color = 0.30, (horizon,) * 3 + (1.0,)
+    els[1].position, els[1].color = 1.00, (zenith,) * 3 + (1.0,)
+    nt.links.new(remap.outputs["Value"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], bg.inputs["Color"])
 
 
 def set_ground_tone(value):
@@ -135,8 +193,8 @@ def set_studio_world(strength=1.0):
     ramp = nt.nodes.new("ShaderNodeValToRGB")
     ramp.location = (-80, 0)
     cr = ramp.color_ramp
-    stops = ((0.00, 0.015), (0.42, 0.03), (0.50, 0.75),   # the horizon glow
-             (0.58, 0.07), (1.00, 0.02))
+    stops = ((0.00, 0.015), (0.38, 0.03), (0.50, 1.15),   # a brighter, wider horizon glow
+             (0.62, 0.07), (1.00, 0.02))                  # -> more rim on the glossy forms
     els = cr.elements
     els[0].position, els[0].color = stops[0][0], (stops[0][1],) * 3 + (1.0,)
     els[1].position, els[1].color = stops[1][0], (stops[1][1],) * 3 + (1.0,)

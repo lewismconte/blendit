@@ -14,3 +14,6 @@ layout:
   - Yellowtrace        # the pen-family paper looks
   - BrownPaper
   - Blueprint
+  - Diagram            # graphic / print looks
+  - Watercolor
+  - Risograph

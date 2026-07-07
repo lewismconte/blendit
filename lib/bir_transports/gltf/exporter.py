@@ -23,6 +23,7 @@ box stays upright and unrotated.
 import array
 import json
 import os
+import shutil
 import struct
 import sys
 
@@ -93,7 +94,58 @@ class GltfExporter(Exporter):
         spec_dict.setdefault("geometry", {})
         spec_dict["geometry"]["transport"] = "gltf"
         spec_dict["geometry"]["uri"] = "scene.glb"
+        self._copy_texture_maps(spec_dict, out_dir)
         return write_scene_spec(out_dir, spec_dict)
+
+    def _copy_texture_maps(self, spec_dict, out_dir):
+        """Bundle the texture files: every material map carrying an absolute
+        `source_path` (bir_extract/appearance.py) is copied into `textures/`
+        and rewritten to a bundle-relative `uri`. Maps whose file is missing
+        are dropped, so the Blender side never chases dead paths. Copies are
+        deduped by source path (many Revit materials share one bitmap)."""
+        copied = {}   # source path -> uri
+        tex_dir = os.path.join(out_dir, "textures")
+        # The exporter owns textures/: start clean so re-exports into the same
+        # cache dir don't accumulate suffixed copies of every bitmap.
+        if os.path.isdir(tex_dir):
+            shutil.rmtree(tex_dir, ignore_errors=True)
+        for rec in spec_dict.get("materials", []) or []:
+            maps = rec.get("maps")
+            if not maps:
+                continue
+            for slot in list(maps.keys()):
+                entry = maps[slot] or {}
+                src = entry.pop("source_path", None)
+                entry.pop("uri", None)    # stale uris never survive an export
+                uri = copied.get(src)
+                if uri is None and src and os.path.isfile(src):
+                    try:
+                        if not os.path.isdir(tex_dir):
+                            os.makedirs(tex_dir)
+                        name = self._unique_name(tex_dir, os.path.basename(src))
+                        shutil.copyfile(src, os.path.join(tex_dir, name))
+                        uri = "textures/" + name
+                        copied[src] = uri
+                    except Exception:
+                        uri = None
+                if uri:
+                    entry["uri"] = uri
+                    maps[slot] = entry
+                else:
+                    del maps[slot]
+            if not maps:
+                rec["maps"] = None
+
+    @staticmethod
+    def _unique_name(tex_dir, name):
+        """Different source files can share a basename; suffix until free."""
+        if not os.path.exists(os.path.join(tex_dir, name)):
+            return name
+        stem, ext = os.path.splitext(name)
+        i = 2
+        while os.path.exists(os.path.join(tex_dir, "%s_%d%s" % (stem, i, ext))):
+            i += 1
+        return "%s_%d%s" % (stem, i, ext)
 
     def _assemble_glb(self, gltf, blob):
         """Wrap the glTF JSON + binary blob in the GLB container."""

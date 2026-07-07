@@ -40,6 +40,25 @@ def live_script_path():
     return os.path.join(REPO_ROOT, "blender", "interactive", "live.py")
 
 
+def prepare_cache_script_path():
+    return os.path.join(REPO_ROOT, "blender", "headless", "prepare_cache.py")
+
+
+def windowed_blender_exe(blender_exe):
+    """The console-free launcher for a WINDOWED Blender session: Blender ships
+    blender-launcher.exe next to blender.exe precisely so the app can start
+    without the black cmd window (it forwards all arguments). Falls back to the
+    given exe when the launcher isn't there (old/portable installs)."""
+    try:
+        launcher = os.path.join(os.path.dirname(blender_exe),
+                                "blender-launcher.exe")
+        if os.path.isfile(launcher):
+            return launcher
+    except Exception:
+        pass
+    return blender_exe
+
+
 def find_blender_exe():
     """A real, existing blender.exe path, or None.
 
@@ -128,6 +147,30 @@ def clear_cache():
         except Exception:
             failed += 1
     return removed, failed
+
+
+def view_cache_key(view):
+    """A stable, filesystem-safe cache key for one VIEW of a document: a hash of
+    the view's UniqueId ONLY (no name part), so a view keeps its slot when it's
+    renamed and two views with the same name never collide. The readable name
+    lives in the slot's fingerprint.json (what the Views list shows). Duck-typed
+    + guarded like doc_cache_key."""
+    uid = ""
+    try:
+        uid = str(view.UniqueId or "")
+    except Exception:
+        pass
+    if not uid:
+        try:
+            uid = str(view.Name or "")
+        except Exception:
+            pass
+    raw = uid or "view"
+    try:
+        digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
+    except Exception:
+        digest = hashlib.md5(str(raw)).hexdigest()[:12]
+    return "view_%s" % digest
 
 
 def doc_cache_key(doc):

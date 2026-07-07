@@ -18,7 +18,9 @@ bir_bootstrap.ensure_paths()
 import bir_config
 import bir_export
 from bir_ui import (report as _report, active_doc as _active_doc,
-                    ensure_loadable_view as _ensure_loadable_view)
+                    ensure_loadable_view as _ensure_loadable_view,
+                    dismiss_output as _dismiss_output,
+                    launch_cache_build as _launch_cache_build)
 
 
 def main():
@@ -29,10 +31,18 @@ def main():
     _report("**Blendit - Load View** - extracting the active view. This can take "
             "a while on a large model; the progress bar shows it working.")
 
-    bundle_ref, _blend = bir_export.refresh_cache(doc, cfg, _report)
+    bundle_ref, blend_path = bir_export.refresh_cache(doc, cfg, _report)
 
-    _report("- **view loaded.** Now press **Open View** to work it in Blender, or "
-            "**Render Loaded** to render it as-is.\n- cache: `%s`" % bundle_ref)
+    msg = ("- **view loaded.** Now press **Open View** to work it in Blender, or "
+           "**Render Loaded** to render it as-is.\n- cache: `%s`" % bundle_ref)
+    # Build the fast-open scene cache NOW, in the background - the import +
+    # merge is Open View's slow step, so it's usually done before the user is.
+    if _launch_cache_build(cfg, bundle_ref, blend_path):
+        msg += ("\n- preparing the fast-open scene in the background - "
+                "**Open View** will be quick once it's ready (the **Views** "
+                "list shows *scene building...* until then).")
+    _report(msg)
+    _dismiss_output(10)     # info only - the window closes itself
 
 
 main()

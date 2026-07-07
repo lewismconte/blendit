@@ -13,11 +13,11 @@ def apply(loaded, spec):
     engine = str(spec.get("render", {}).get("engine", "CYCLES")).upper()
     apply_materials(loaded, engine=engine)
     _helpers.set_glossiness(loaded, 0.08)   # glossy, just short of mirror
-    _helpers.set_studio_world()             # dark gradient + horizon glow
-    _helpers.set_sun_energy(2.0)            # soft studio key, not daylight
-    _helpers.set_sun_softness(4.0)          # big source -> soft shadows
+    _helpers.set_studio_world()             # dark gradient + bright horizon glow (rim)
+    _helpers.set_sun_energy(3.2)            # firmer studio key -> lit faces + edges read
+    _helpers.set_sun_softness(3.0)          # big soft source, but shadows still shape the form
     _helpers.set_ground_finish(0.03, 0.12)  # the dark reflective floor
-    _helpers.set_view("AgX", -0.5)          # let the highlights carry the image
+    _helpers.set_view("AgX", -0.3)          # a touch brighter so the forms lift off the black
 
 
 register_preset("specular", apply)

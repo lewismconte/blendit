@@ -81,6 +81,17 @@ def _sun_settings(view3d, sun):
     # anything else (a range has no single truth - the agreed default).
     try:
         start = sst.StartDateAndTime
+        # StartDateAndTime comes back in UTC, converted with the MACHINE's
+        # timezone (verified live: Revit showed 12:00, the API gave 02:00 on a
+        # UTC+10 machine). ToLocalTime() is the exact inverse - it recovers the
+        # wall-clock the user saw (no-op if a build ever returns local time).
+        # Without this, the Blender-side location+time cross-check reads
+        # "middle of the night", overrules Revit's correct sun angles, and a
+        # noon render comes out black.
+        try:
+            start = start.ToLocalTime()
+        except Exception:
+            pass
         sun["date"] = _fmt_date(start)
         sun["time"] = _fmt_time(start) if still else "12:00"
     except Exception:

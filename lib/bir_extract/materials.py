@@ -1,16 +1,23 @@
-"""Revit materials -> neutral SceneSpec material records (contract 0.1.0 fields).
+"""Revit materials -> neutral SceneSpec material records (contract 0.2.0).
 
-Phase 1 uses the graphics-shading properties (Material.Color / Transparency /
-Smoothness), which always exist, so every material renders as *something* sane.
-Richer appearance-asset reading (metallic detection, glossiness, textures, the
-Appendix D `appearance_class`) is the next material iteration -> contract 0.2.0.
+The graphics-shading properties (Material.Color / Transparency / Smoothness)
+always exist, so every material renders as *something* sane. The appearance
+asset (real textures, glossiness, appearance class - bir_extract/appearance.py)
+is then merged OVER that base when it can be read: a material whose asset is
+missing or unreadable silently keeps the graphics approximation.
+
+Material ids from LINKED models are namespaced "mat_l<instance-id>_<mat-id>"
+(see geometry.extract_geometry) and resolve against the link's own Document -
+both the graphics shading and the appearance asset live there, and the host
+doc either lacks the id or owns an unrelated material under it.
 """
 from bir_extract import _compat
+from bir_extract import appearance
 
 DB = _compat.DB
 
 
-def extract_materials(doc, material_ids):
+def extract_materials(doc, material_ids, link_docs=None):
     out = []
     for mid in sorted(material_ids):
         if mid == "mat_default":
@@ -18,10 +25,11 @@ def extract_materials(doc, material_ids):
             continue
         rec = None
         try:
-            val = int(mid[4:])  # strip "mat_"
-            el = doc.GetElement(_compat.make_element_id(val))
+            owner, val = _resolve(doc, mid, link_docs or {})
+            el = owner.GetElement(_compat.make_element_id(val)) \
+                if owner is not None else None
             if isinstance(el, DB.Material):
-                rec = _from_material(el)
+                rec = _from_material(owner, el)
                 rec["id"] = mid
         except Exception:
             rec = None
@@ -29,12 +37,20 @@ def extract_materials(doc, material_ids):
     return out
 
 
+def _resolve(doc, mid, link_docs):
+    """-> (owning Document, integer material id) for a material key."""
+    if mid.startswith("mat_l"):
+        head, val = mid.rsplit("_", 1)
+        return link_docs.get(head + "_"), int(val)
+    return doc, int(mid[4:])  # strip "mat_"
+
+
 def _default_record(mid):
     return {"id": mid, "name": "Default", "base_color": [0.7, 0.7, 0.7],
             "metallic": 0.0, "roughness": 0.6, "transparency": 0.0, "ior": 1.45}
 
 
-def _from_material(mat):
+def _from_material(doc, mat):
     base = [0.7, 0.7, 0.7]
     try:
         color = mat.Color
@@ -64,5 +80,9 @@ def _from_material(mat):
     except Exception:
         pass
 
-    return {"id": "", "name": name, "base_color": base, "metallic": 0.0,
-            "roughness": roughness, "transparency": transparency, "ior": 1.45}
+    rec = {"id": "", "name": name, "base_color": base, "metallic": 0.0,
+           "roughness": roughness, "transparency": transparency, "ior": 1.45}
+    # Appearance asset (textures / glossiness / class) wins over the graphics
+    # approximation wherever it could actually be read.
+    rec.update(appearance.read_appearance(doc, mat))
+    return rec

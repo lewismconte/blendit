@@ -29,11 +29,11 @@ locking your work in.
 
 ## What you get
 
-- 🎨 **Twelve render looks** — photoreal, white-card / clay massing, a sun-accurate
-  shadow study, a dark showroom, and a stylised drawing family: **linework, pen,
-  sketch, cel, hatch, yellowtrace, brown paper, and blueprint**. Pick one on the
-  ribbon (hover for a preview); switch live in the review session — or render a
-  **contact sheet** of your shot in all twelve at once.
+- 🎨 **Fifteen render looks** — photoreal, white-card / clay massing, a sun-accurate
+  shadow study, a dark showroom, and a stylised drawing/print family: **linework, pen,
+  sketch, cel, hatch, yellowtrace, brown paper, blueprint, diagram, watercolor, and
+  risograph**. Pick one on the ribbon (hover for a preview); switch live in the review
+  session — or render a **contact sheet** of your shot in all fifteen at once.
 - ☁️ **Atmosphere & weather** — procedural **volumetric clouds** and sky: seven cloud
   types (fair-weather cumulus → overcast → towering storm), a live sun / time-of-day,
   and a 360° storm-ring mode. All procedural — no downloads, no huge sky files.
@@ -49,10 +49,17 @@ locking your work in.
 - 🛬 **Compose your shot** — an interactive review session where you fly around, frame
   the view, straighten your verticals (two-point) or switch to orthographic, tweak the
   light, and snap a capture — all without touching Revit again.
-- ⚡ **Fast and repeatable** — the model is cached, so opening it again is instant, and
-  it's tuned to stay quick even on big, detailed models.
+- 🔗 **What you see is what you get** — the render matches your Revit view: **linked
+  models come through complete** (with their own materials), trees and entourage
+  included, and the view's visibility is respected — hidden elements, categories,
+  phases and section boxes stay hidden. Real material **textures** come straight
+  from Revit's appearance assets at real-world scale, and a model with its own site
+  keeps its terrain (no fake ground plane).
+- ⚡ **Fast and repeatable** — while you're still in Revit, Blendit prepares the
+  scene in the background, so **Open View** typically opens in seconds; the model is
+  cached and it's tuned to stay quick even on big, detailed, multi-link models.
 
-## The twelve looks
+## The fifteen looks
 
 Every mode, one click apart (the built-in demo scene — hover any Mode button in
 Revit for the same previews):
@@ -67,6 +74,8 @@ Revit for the same previews):
 | **Sketch** | **Cel / Anime** | **Hatch** |
 | ![Yellowtrace](media/modes/yellowtrace.png) | ![Brown Paper](media/modes/kraft.png) | ![Blueprint](media/modes/blueprint.png) |
 | **Yellowtrace** | **Brown Paper** | **Blueprint** |
+| ![Diagram](media/modes/diagram.png) | ![Watercolor](media/modes/watercolor.png) | ![Risograph](media/modes/risograph.png) |
+| **Diagram** | **Watercolor** | **Risograph** |
 
 ## Requirements
 
@@ -101,13 +110,17 @@ From the **Blendit** ribbon:
 
 1. Open a **3D view** — or a **plan / section / elevation** — in Revit.
 2. **Load View** — pulls the active view across (the one slow step, with a progress
-   bar). A 2D view arrives as a scale-true orthographic drawing, cut and framed to
-   match Revit.
+   bar). Your **composed framing comes with it**: a 3D view keeps its exact camera
+   (eye, direction, field of view); a 2D view arrives as a scale-true orthographic
+   drawing, cut and framed to match Revit. Load as many views as you like — each
+   keeps its own cached copy.
 3. Then either:
    - **Open View** — opens it in Blender to fly around, compose, tweak the look, pose
      2D plans / elevations / sections, and capture your shot, or
    - **Render Loaded** — renders it straight to an image, no fuss.
-4. **Open Renders** to find your images.
+4. **Views** — every loaded view in one list (marked when the model has changed
+   since Load): open, render, reload or remove any of them from there.
+5. **Open Renders** to find your images.
 
 **Settings** lets you set the Blender path, output folder, default render look, and
 quality. That's the whole workflow.
@@ -124,8 +137,8 @@ Blendit works today, and it's built to grow. On the roadmap:
   streaming only what changed.
 - 🌳 **Entourage & assets** — a library of procedural trees, people and cars you can
   scatter into a scene (and round-trip back to Revit as lightweight placeholders).
-- 🧱 **Richer materials** — pull real textures and colours from Revit's own material
-  and appearance settings.
+- 🧱 **Richer materials** — real Revit textures ship today; next up: roughness /
+  cutout maps, tint colours, and category-aware treatments (mirror, water).
 - 🎬 **Animation** — fly-throughs and turntables.
 - 🌅 **HDRI skies** and more lighting options.
 
@@ -136,9 +149,11 @@ Blendit works today, and it's built to grow. On the roadmap:
 - **Clouds and photoreal renders look best in Cycles.** For faster Cycles renders,
   turn on your GPU once in Blender's **Preferences → System**. The default EEVEE
   engine is realtime either way.
-- **Materials** are a curated set matched to your Revit material names — and you can
-  swap any surface live in the review session. (Reading real Revit textures is on the
-  roadmap.)
+- **Materials come from your Revit model**: Blendit reads each material's appearance
+  asset and brings its real **texture maps** (diffuse + bump) across at their
+  real-world scale. Anything without a readable texture falls back to a curated
+  surface matched on the material name — and you can swap any surface live in the
+  review session.
 - **Windows only** for now.
 
 ## License & credits
@@ -180,8 +195,8 @@ blender --background --python blender/headless/render.py -- ^
 ```
 
 `MODE`: `realistic`, `white`, `shadow`, `specular`, `linework`, `pen`, `sketch`,
-`cel`, `hatch`, `yellowtrace`, `kraft`, `blueprint`. All modes at once:
-`blender --background --python tests/smoke_render.py`.
+`cel`, `hatch`, `yellowtrace`, `kraft`, `blueprint`, `diagram`, `watercolor`,
+`risograph`. All modes at once: `blender --background --python tests/smoke_render.py`.
 
 Verified on Blender 5.0 / 5.1; Blender 4.2 LTS is the intended floor (API differences
 are handled at runtime, but treat 4.2 as best-effort until re-verified).

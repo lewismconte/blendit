@@ -1,0 +1,330 @@
+"""WYSIWYG extraction: Revit's CustomExporter walks a 3D view's DISPLAYED
+geometry - host and linked models, with every visibility rule applied (hidden
+elements/categories, per-link overrides, phases, design options, section box,
+crop) - so the bundle contains exactly what the user sees in the view. This is
+the same mechanism real exporters use; geometry.py's collector walk remains the
+fallback (and the 2D-view path), where link content can only be approximated.
+
+Material ids inside links are namespaced per linked DOCUMENT ("mat_l<n>_<id>")
+and resolved against that document by materials.extract_materials.
+
+IronPython 2.7 + pure ASCII. Keep it that way.
+"""
+from bir_contract.transport import MeshData
+from bir_extract import _compat
+
+DB = _compat.DB
+_DEFAULT_MAT = "mat_default"
+
+
+def available():
+    return DB is not None and hasattr(DB, "CustomExporter")
+
+
+def extract_view(doc, view3d, progress=None):
+    """-> (meshes, elements, material_ids, link_docs) for exactly what the view
+    displays. Raises on failure - the caller falls back to the collector walk."""
+    ctx = _Context(doc, view3d, progress)
+    exporter = DB.CustomExporter(doc, ctx)
+    for attr, val in (("IncludeGeometricObjects", False),
+                      ("ShouldStopOnError", False)):
+        try:
+            setattr(exporter, attr, val)
+        except Exception:
+            pass
+    exporter.Export(view3d)
+    if not ctx.meshes:
+        raise RuntimeError("CustomExporter produced no geometry")
+    _append_rpc_proxies(doc, view3d, ctx)
+    return ctx.meshes, ctx.elements, ctx.material_ids, ctx.link_docs
+
+
+def _append_rpc_proxies(doc, view3d, ctx):
+    """Tessellate the proxy meshes of RPC elements (trees / entourage) the
+    exporter reported but gave no geometry for. Host elements use the view's
+    own representation; link elements use Fine detail + the link transform."""
+    from bir_extract import geometry as geo
+    for cur_doc, prefix, xf, eid in ctx.rpc_elements:
+        try:
+            el = cur_doc.GetElement(eid)
+            if el is None:
+                continue
+            opt = DB.Options()
+            if cur_doc is doc:
+                try:
+                    opt.View = view3d
+                except Exception:
+                    opt.DetailLevel = DB.ViewDetailLevel.Fine
+            else:
+                opt.DetailLevel = DB.ViewDetailLevel.Fine
+            opt.ComputeReferences = False
+            opt.IncludeNonVisibleObjects = False
+            g = el.get_Geometry(opt)
+            if g is None:
+                continue
+            groups = {}
+            geo._collect(g, groups, prefix, xf)
+            if not groups:
+                continue
+            cat = "Element"
+            try:
+                if el.Category is not None:
+                    cat = el.Category.Name.replace(" ", "")
+            except Exception:
+                pass
+            raw = _compat.id_value(eid)
+            key = str(raw) if prefix == "mat_" else "%s%s" % (prefix[4:], raw)
+            single = len(groups) == 1
+            n = 0
+            for mat_key, data in groups.items():
+                if not data["tris"]:
+                    continue
+                node = ("%s_%s" % (cat, key) if single
+                        else "%s_%s_%d" % (cat, key, n))
+                n += 1
+                ctx.meshes.append(MeshData(node, data["verts"], data["tris"],
+                                           material_id=mat_key))
+                ctx.elements.append({"node": node, "element_id": key,
+                                     "category": cat, "level": "",
+                                     "material_id": mat_key})
+                ctx.material_ids.add(mat_key)
+        except Exception:
+            pass
+
+
+class _Context(DB.IExportContext):
+    """Accumulates polymeshes per (element, material) with the full transform
+    stack applied, tracking the document stack so link elements keep their own
+    identity and material namespace."""
+
+    def __init__(self, doc, view3d, progress=None):
+        self._host = doc
+        self._progress = progress
+        self._docs = [doc]                    # document stack (links push)
+        self._prefixes = ["mat_"]             # material-key prefix per doc scope
+        self._xf = [None]                     # transform stack (None = identity)
+        self._elem_ids = []                   # element-id stack (links nest)
+        self._groups = {}                     # (elem key) -> {mat_key: verts/tris}
+        self._mat_key = _DEFAULT_MAT
+        self._link_count = 0
+        self._done = 0
+        # Progress ESTIMATE: host count + each visible link's element count -
+        # one monotonic bar instead of the per-link restarts of the old walk.
+        self._total = 0
+        try:
+            elems = list(DB.FilteredElementCollector(doc, view3d.Id)
+                         .WhereElementIsNotElementType())
+            self._total = len(elems)
+            for e in elems:
+                try:
+                    if isinstance(e, DB.RevitLinkInstance) \
+                            and not e.IsHidden(view3d):
+                        ldoc = e.GetLinkDocument()
+                        if ldoc is not None:
+                            self._total += (
+                                DB.FilteredElementCollector(ldoc)
+                                .WhereElementIsNotElementType()
+                                .GetElementCount())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self.meshes = []
+        self.elements = []
+        self.material_ids = set()
+        self.link_docs = {}
+        self.rpc_elements = []                # (doc, prefix, link_xf, element_id)
+        self._rpc_seen = set()
+        self._link_xf = [None]                # LINK-scope transform only (no
+        self._view = view3d                   # instance transforms - see OnRPC)
+
+    # --- lifecycle ------------------------------------------------------------
+    def Start(self):
+        return True
+
+    def Finish(self):
+        pass
+
+    def IsCanceled(self):
+        return False
+
+    def OnViewBegin(self, node):
+        # 0..15; middling detail == the viewport's own tessellation quality.
+        try:
+            node.LevelOfDetail = 8
+        except Exception:
+            pass
+        return DB.RenderNodeAction.Proceed
+
+    def OnViewEnd(self, element_id):
+        pass
+
+    # --- scopes ----------------------------------------------------------------
+    def OnElementBegin(self, element_id):
+        self._elem_ids.append(element_id)
+        self._done += 1
+        if self._progress is not None and self._done % 50 == 0:
+            try:
+                total = max(self._total, self._done)
+                self._progress(min(self._done, total), total)
+            except Exception:
+                pass
+        return DB.RenderNodeAction.Proceed
+
+    def OnElementEnd(self, element_id):
+        try:
+            self._flush_element(element_id)
+        except Exception:
+            pass
+        if self._elem_ids:
+            self._elem_ids.pop()
+
+    def OnInstanceBegin(self, node):
+        self._push_xf(node)
+        return DB.RenderNodeAction.Proceed
+
+    def OnInstanceEnd(self, node):
+        self._xf.pop()
+
+    def OnLinkBegin(self, node):
+        self._push_xf(node)
+        ldoc = None
+        try:
+            ldoc = node.GetDocument()
+        except Exception:
+            pass
+        if ldoc is not None:
+            prefix = None
+            for known, d in self.link_docs.items():
+                if d is ldoc:
+                    prefix = known
+                    break
+            if prefix is None:
+                self._link_count += 1
+                prefix = "mat_l%d_" % self._link_count
+                self.link_docs[prefix] = ldoc
+            self._docs.append(ldoc)
+            self._prefixes.append(prefix)
+        else:
+            self._docs.append(self._docs[-1])
+            self._prefixes.append(self._prefixes[-1])
+        self._link_xf.append(self._xf[-1])    # the composed transform AT link entry
+        return DB.RenderNodeAction.Proceed
+
+    def OnLinkEnd(self, node):
+        self._xf.pop()
+        self._docs.pop()
+        self._prefixes.pop()
+        self._link_xf.pop()
+
+    def OnFaceBegin(self, node):
+        return DB.RenderNodeAction.Proceed
+
+    def OnFaceEnd(self, node):
+        pass
+
+    def OnLight(self, node):
+        pass
+
+    def OnRPC(self, node):
+        # RPC content (planting / entourage - the trees) yields NO polymesh
+        # from the exporter. Remember the element + its scope; extract_view
+        # tessellates the RPC proxy mesh afterwards so trees don't vanish.
+        # Record the LINK transform only - element.get_Geometry returns MODEL
+        # coordinates (instance placement already applied), so carrying the
+        # walk's instance transform here double-transforms and the trees end
+        # up scattered in the sky.
+        try:
+            if self._elem_ids:
+                key = (len(self._docs) - 1,
+                       _compat.id_value(self._elem_ids[-1]))
+                if key not in self._rpc_seen:
+                    self._rpc_seen.add(key)
+                    self.rpc_elements.append(
+                        (self._docs[-1], self._prefixes[-1],
+                         self._link_xf[-1], self._elem_ids[-1]))
+        except Exception:
+            pass
+
+    # --- content ---------------------------------------------------------------
+    def OnMaterial(self, node):
+        try:
+            mid = node.MaterialId
+            if mid is None or mid == DB.ElementId.InvalidElementId:
+                self._mat_key = _DEFAULT_MAT
+            else:
+                self._mat_key = "%s%s" % (self._prefixes[-1],
+                                          _compat.id_value(mid))
+        except Exception:
+            self._mat_key = _DEFAULT_MAT
+
+    def OnPolymesh(self, mesh):
+        try:
+            key = self._elem_key()
+            groups = self._groups.setdefault(key, {})
+            g = groups.setdefault(self._mat_key, {"verts": [], "tris": []})
+            base = len(g["verts"])
+            xf = self._xf[-1]
+            pts = mesh.GetPoints()
+            if xf is None:
+                for p in pts:
+                    g["verts"].append((p.X, p.Y, p.Z))
+            else:
+                for p in pts:
+                    q = xf.OfPoint(p)
+                    g["verts"].append((q.X, q.Y, q.Z))
+            for f in mesh.GetFacets():
+                g["tris"].append((base + f.V1, base + f.V2, base + f.V3))
+        except Exception:
+            pass
+
+    # --- helpers ---------------------------------------------------------------
+    def _push_xf(self, node):
+        try:
+            t = node.GetTransform()
+            if t is None or t.IsIdentity:
+                self._xf.append(self._xf[-1])
+                return
+            top = self._xf[-1]
+            self._xf.append(t if top is None else top.Multiply(t))
+        except Exception:
+            self._xf.append(self._xf[-1])
+
+    def _elem_key(self):
+        eid = self._elem_ids[-1] if self._elem_ids else None
+        # (doc-scope index, element id) - unique across host + links
+        return (len(self._docs) - 1, self._prefixes[-1],
+                _compat.id_value(eid) if eid is not None else 0)
+
+    def _flush_element(self, element_id):
+        key = self._elem_key()
+        groups = self._groups.pop(key, None)
+        if not groups:
+            return
+        cur_doc = self._docs[-1]
+        prefix = self._prefixes[-1]
+        raw = _compat.id_value(element_id)
+        eid = str(raw) if prefix == "mat_" else "%s%s" % (prefix[4:], raw)
+        cat = "Element"
+        level = ""
+        try:
+            el = cur_doc.GetElement(element_id)
+            if el is not None and el.Category is not None:
+                cat = el.Category.Name.replace(" ", "")
+        except Exception:
+            pass
+        single = len(groups) == 1
+        n = 0
+        for mat_key, data in groups.items():
+            if not data["tris"]:
+                continue
+            node = "%s_%s" % (cat, eid) if single else "%s_%s_%d" % (cat, eid, n)
+            n += 1
+            self.meshes.append(MeshData(node, data["verts"], data["tris"],
+                                        material_id=mat_key))
+            self.elements.append({"node": node, "element_id": eid,
+                                  "category": cat, "level": level,
+                                  "material_id": mat_key})
+            self.material_ids.add(mat_key)
+
+

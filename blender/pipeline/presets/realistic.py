@@ -10,7 +10,7 @@ def apply(loaded, spec):
     _helpers.clear_npr()
     engine = str(spec.get("render", {}).get("engine", "CYCLES")).upper()
     apply_materials(loaded, engine=engine)
-    _helpers.set_view("AgX", -0.6)          # filmic; keeps the sun+sky from setup_world
+    _helpers.set_view("AgX", -0.35)         # filmic; keeps the sun+sky from setup_world
 
 
 register_preset("realistic", apply)

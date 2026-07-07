@@ -32,7 +32,8 @@ def _parse_args():
     p.add_argument("--mode",
                    choices=["realistic", "white", "shadow", "linework", "specular",
                             "pen", "sketch", "cel", "hatch", "yellowtrace",
-                            "kraft", "blueprint"])
+                            "kraft", "blueprint", "diagram", "watercolor",
+                            "risograph"])
     p.add_argument("--samples", type=int)
     p.add_argument("--resolution", nargs=2, type=int, metavar=("W", "H"),
                    help="override the output resolution")
@@ -51,7 +52,7 @@ def _parse_args():
 
 
 _LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch", "yellowtrace",
-               "kraft", "blueprint")
+               "kraft", "blueprint", "diagram", "watercolor", "risograph")
 
 
 def _fmt_duration(seconds):

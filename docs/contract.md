@@ -82,20 +82,27 @@ written into every bundle as `contract_version`.
 
 Keep both declarations and this doc in sync when the contract moves.
 
-## Planned additive change — material mapping fields (Appendix D)
+## Contract 0.2.0 — real material appearance (SHIPPED)
 
-To map Revit appearances with intent (and avoid the "everything looks like
-plastic" failure mode), the `Material` record is slated to gain four **optional**
-fields (additive → minor bump):
+The Appendix-D material iteration. The `Material` record gained three **optional**
+fields (additive → minor bump 0.1.0 → 0.2.0; 0.1.0 bundles still load, with a
+console note):
 
 | Field | Type | Meaning |
 |---|---|---|
-| `appearance_class` | string enum | `generic·metal·glass·mirror·water·ceramic·stone·masonry·concrete·wood·plastic·self_illum` — drives the category-aware Blender treatment |
-| `glossiness` | number 0..1 \| null | raw Revit glossiness; Blender derives roughness from it when present |
-| `diffuse_texture` | string \| null | relative uri into `assets/` |
-| `tint` | rgb \| null | Revit tint color |
+| `appearance_class` | string | `generic·metal·glass·mirror·water·ceramic·stone·masonry·concrete·wood·plastic·wallpaint` — coarse class from the asset's schema (drives e.g. the metallic hint) |
+| `glossiness` | number 0..1 \| null | raw Revit glossiness; roughness = 1 − glossiness when present |
+| `maps` | object \| null | texture maps: `{"diffuse": map, "bump": map}` |
 
-This is **proposed, not yet applied** — pending contract sign-off. When applied,
-update `scene_spec.py`, the schema's `material` `$defs`, `CONTRACT_VERSION`
-(→ 0.2.0), and this doc together. The Blender-side mapping that consumes these
-fields will live in `blender/pipeline/materials.py` (Phase 1).
+Each map: `{"uri": "textures/<file>", "scale_m": [sx, sy], "offset_m": [ox, oy],
+"rotation_deg": a, "amount": b}` (`amount` bump only). The **producer**
+(`bir_extract/appearance.py`) walks the Revit appearance asset
+(`AppearanceAssetElement.GetRenderingAsset()` → connected `UnifiedBitmap`s) and
+emits absolute `source_path`s; the **glTF exporter** copies those files into the
+bundle's `textures/` dir (deduped) and rewrites them to bundle-relative `uri`s —
+a `source_path` never reaches disk. The **consumer**
+(`blender/pipeline/materials.py`) box-projects the bitmaps on Object coordinates
+at `scale_m`: Revit gives no UVs, and its own mapping is real-world box
+projection, so this reproduces it exactly (merge guarantees Object == world
+metres). A material whose asset can't be read falls back to the graphics-shading
+approximation + the curated library, as before.

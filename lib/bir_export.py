@@ -4,6 +4,7 @@ Used by Load Model (extraction) and by Render Loaded Model / Open Model (which r
 the cache), so the extraction path is identical. IronPython 2.7 safe. The caller
 passes the active doc (it holds __revit__) and a report(msg) callback for output.
 """
+import datetime
 import json
 import os
 
@@ -22,20 +23,22 @@ def _render_overrides(cfg):
             "denoise": cfg.get("denoise")}
 
 
-def extract_or_demo(doc, cfg, report, progress=None):
-    """-> (spec_dict, meshes). Real active-3D-view extraction, demo box fallback."""
+def extract_or_demo(doc, cfg, report, progress=None, view=None):
+    """-> (spec_dict, meshes). Real view extraction (the active view, or an
+    explicit `view` - the Views list's Reload), demo box fallback."""
     overrides = _render_overrides(cfg)
     if doc is None:
         report("- no active Revit document -> using demo box")
     else:
         try:
             from bir_extract import revit_extract
-            view = revit_extract.active_view(doc)
+            if view is None:
+                view = revit_extract.active_view(doc)
             if view is None:
                 report("- active view can't be loaded -> using demo box "
                        "(open a 3D, plan, section or elevation view)")
             else:
-                report("- extracting the active view...")
+                report("- extracting view `%s`..." % view.Name)
                 spec, meshes = revit_extract.build_scene_spec(
                     doc, view, render_overrides=overrides, progress=progress)
                 if meshes:
@@ -51,10 +54,10 @@ def extract_or_demo(doc, cfg, report, progress=None):
     return spec, meshes
 
 
-def export_bundle(doc, cfg, report, progress=None, out_dir=None):
+def export_bundle(doc, cfg, report, progress=None, out_dir=None, view=None):
     """-> (bundle_ref, out_dir). Extract + write the glTF bundle. `out_dir` lets
     callers (Load Model) target the model cache instead of the render folder."""
-    spec, meshes = extract_or_demo(doc, cfg, report, progress=progress)
+    spec, meshes = extract_or_demo(doc, cfg, report, progress=progress, view=view)
     report("- writing the glTF bundle...")
     if out_dir is None:
         out_dir = cfg.get("output_dir") or bir_bootstrap.default_output_dir()
@@ -62,7 +65,7 @@ def export_bundle(doc, cfg, report, progress=None, out_dir=None):
     return bundle_ref, out_dir
 
 
-def export_bundle_with_progress(doc, cfg, report, out_dir=None):
+def export_bundle_with_progress(doc, cfg, report, out_dir=None, view=None):
     """export_bundle wrapped in a pyRevit progress bar when available (the
     extraction over thousands of elements is the main wait). Falls back to a
     plain export if pyRevit forms aren't available."""
@@ -71,7 +74,7 @@ def export_bundle_with_progress(doc, cfg, report, out_dir=None):
     except Exception:
         forms = None
     if forms is None:
-        return export_bundle(doc, cfg, report, out_dir=out_dir)
+        return export_bundle(doc, cfg, report, out_dir=out_dir, view=view)
 
     title = "Blendit - extracting model... ({value} of {max_value})"
     with forms.ProgressBar(title=title) as pb:
@@ -80,61 +83,185 @@ def export_bundle_with_progress(doc, cfg, report, out_dir=None):
                 pb.update_progress(done, total)
             except Exception:
                 pass
-        return export_bundle(doc, cfg, report, progress=progress, out_dir=out_dir)
+        return export_bundle(doc, cfg, report, progress=progress,
+                             out_dir=out_dir, view=view)
 
 
-# --- model cache --------------------------------------------------------------
-def cache_paths(doc):
-    """-> (cache_dir, bundle_ref, blend_path) for this document. The bundle_ref is
-    the sidecar scene_spec.json path; the .blend is the prepared-scene cache."""
-    key = bir_bootstrap.doc_cache_key(doc)
-    cdir = bir_bootstrap.cache_dir_for(key)
+# --- model cache (one slot PER VIEW) -------------------------------------------
+# Layout: <cache_root>/<doc_key>/views/<view_key>/{scene_spec.json, scene.glb,
+# textures/, scene.blend, fingerprint.json}. Every loaded view keeps its own
+# bundle, so plans / sections / 3D shots coexist and the Views list can offer
+# them all. Pre-multiview caches lived at the <doc_key> root; cached_bundle
+# still falls back to that legacy slot so nothing breaks on upgrade.
+
+def _active_view(doc):
+    try:
+        from bir_extract import revit_extract
+        return revit_extract.active_view(doc)
+    except Exception:
+        return None
+
+
+def cache_paths(doc, view=None):
+    """-> (cache_dir, bundle_ref, blend_path) for one VIEW of this document
+    (`view` None = the active view). Falls back to the legacy per-doc root when
+    no view can be resolved (headless / tests / non-loadable active view)."""
+    root = bir_bootstrap.cache_dir_for(bir_bootstrap.doc_cache_key(doc))
+    if view is None:
+        view = _active_view(doc)
+    if view is None:
+        cdir = root
+    else:
+        cdir = os.path.join(root, "views", bir_bootstrap.view_cache_key(view))
+        if not os.path.isdir(cdir):
+            try:
+                os.makedirs(cdir)
+            except Exception:
+                pass
     return (cdir,
             os.path.join(cdir, SCENE_SPEC_FILENAME),
             os.path.join(cdir, _BLEND_NAME))
 
 
-def cached_bundle(doc):
-    """-> (bundle_ref, blend_path) if a cached extraction exists for this doc,
-    else (None, blend_path). blend_path may not exist yet (built on first open)."""
-    cdir, bundle_ref, blend_path = cache_paths(doc)
+def cached_bundle(doc, view=None):
+    """-> (bundle_ref, blend_path) if a cached extraction exists for this view
+    (falling back to the legacy per-doc slot), else (None, blend_path)."""
+    cdir, bundle_ref, blend_path = cache_paths(doc, view)
     if os.path.isfile(bundle_ref):
         return bundle_ref, blend_path
+    root = bir_bootstrap.cache_dir_for(bir_bootstrap.doc_cache_key(doc))
+    legacy = os.path.join(root, SCENE_SPEC_FILENAME)
+    if os.path.isfile(legacy):
+        return legacy, os.path.join(root, _BLEND_NAME)
     return None, blend_path
 
 
-def refresh_cache(doc, cfg, report):
-    """Re-extract the active view into this doc's cache slot and invalidate the
-    stale prepared .blend (geometry changed). -> (bundle_ref, blend_path)."""
-    cdir, bundle_ref, blend_path = cache_paths(doc)
-    bundle_ref, _ = export_bundle_with_progress(doc, cfg, report, out_dir=cdir)
+def refresh_cache(doc, cfg, report, view=None):
+    """(Re-)extract a view (`view` None = the active view) into ITS cache slot
+    and invalidate that slot's prepared .blend. -> (bundle_ref, blend_path)."""
+    if view is None:
+        view = _active_view(doc)
+    cdir, bundle_ref, blend_path = cache_paths(doc, view)
+    bundle_ref, _ = export_bundle_with_progress(doc, cfg, report,
+                                                out_dir=cdir, view=view)
     try:
         if os.path.isfile(blend_path):
             os.remove(blend_path)  # the .blend no longer matches the geometry
     except Exception:
         pass
-    save_fingerprint(doc, cdir)    # remember what the model looked like at Load
+    save_fingerprint(doc, cdir, view)   # what the model looked like at Load
     return bundle_ref, blend_path
 
 
+_BUSY_SUFFIX = ".busy"
+_BUSY_STALE_S = 45 * 60      # a crashed build's sentinel expires after 45 min
+
+
+def cache_state(blend_path):
+    """-> 'ready' | 'building' | 'none' for a slot's fast-open scene cache.
+    'building' = the background build's sentinel exists and is fresh."""
+    if os.path.isfile(blend_path):
+        return "ready"
+    busy = blend_path + _BUSY_SUFFIX
+    try:
+        import time
+        if os.path.isfile(busy) and \
+                (time.time() - os.path.getmtime(busy)) < _BUSY_STALE_S:
+            return "building"
+    except Exception:
+        pass
+    return "none"
+
+
+def loaded_views(doc):
+    """-> [slot dicts] for every view loaded from this document, newest first.
+    Each: {view_name, view_kind, view_uid, loaded_at, cache_dir, bundle_ref,
+    blend_path}."""
+    root = bir_bootstrap.cache_dir_for(bir_bootstrap.doc_cache_key(doc))
+    vroot = os.path.join(root, "views")
+    out = []
+    try:
+        names = os.listdir(vroot)
+    except Exception:
+        return out
+    for name in sorted(names):
+        cdir = os.path.join(vroot, name)
+        bundle_ref = os.path.join(cdir, SCENE_SPEC_FILENAME)
+        if not os.path.isfile(bundle_ref):
+            continue
+        meta = _load_fingerprint(cdir) or {}
+        out.append({
+            "view_name": meta.get("view") or name,
+            "view_kind": meta.get("view_kind") or "",
+            "view_uid": meta.get("view_uid") or "",
+            "loaded_at": meta.get("loaded_at") or "",
+            "cache_dir": cdir,
+            "bundle_ref": bundle_ref,
+            "blend_path": os.path.join(cdir, _BLEND_NAME),
+        })
+    out.sort(key=lambda d: d.get("loaded_at") or "", reverse=True)
+    return out
+
+
+def resolve_view(doc, uid):
+    """The live view element for a slot's stored UniqueId, or None (deleted)."""
+    if not uid:
+        return None
+    try:
+        return doc.GetElement(uid)
+    except Exception:
+        return None
+
+
+def remove_slot(slot):
+    """Delete one loaded view's cache slot. True on success."""
+    import shutil
+    try:
+        shutil.rmtree(slot["cache_dir"])
+        return True
+    except Exception:
+        return False
+
+
 # --- staleness fingerprint ------------------------------------------------
-# Saved at Load Model time so Open Model / Render Loaded Model can warn when the
-# cached extraction no longer matches the model ("why is my new wall missing?").
-# Deliberately cheap and approximate: view name + visible element count + the
-# model file's mtime. A soft signal, never a blocker.
+# Saved at Load View time so Open View / Render Loaded / the Views list can warn
+# when a cached extraction no longer matches the model ("why is my new wall
+# missing?"). Deliberately cheap and approximate: visible element count + the
+# model file's mtime (+ the view identity for the meta). A soft signal, never a
+# blocker.
 _FINGERPRINT_NAME = "fingerprint.json"
 
 
-def _model_fingerprint(doc):
-    """-> {view, elements, file_mtime} for the CURRENT model state, or None when
-    it can't be computed (no doc / unsupported view / headless)."""
+def _view_meta(view):
+    """Best-effort identity for a view - duck-typed, no Revit API needed."""
+    meta = {}
+    try:
+        meta["view"] = str(view.Name)
+    except Exception:
+        pass
+    try:
+        meta["view_uid"] = str(view.UniqueId)
+    except Exception:
+        pass
+    try:
+        from bir_extract import camera
+        meta["view_kind"] = camera.view_kind(view)
+    except Exception:
+        pass
+    return meta
+
+
+def _model_fingerprint(doc, view=None):
+    """-> {elements, file_mtime} for the CURRENT model state as seen by `view`
+    (None = active view), or None when it can't be computed (headless / no doc)."""
     if doc is None:
         return None
     try:
-        from bir_extract import revit_extract, _compat
+        from bir_extract import _compat
         if _compat.DB is None:
             return None
-        view = revit_extract.active_view(doc)
+        if view is None:
+            view = _active_view(doc)
         if view is None:
             return None
         count = (_compat.DB.FilteredElementCollector(doc, view.Id)
@@ -146,20 +273,23 @@ def _model_fingerprint(doc):
                 mtime = int(os.path.getmtime(path))
         except Exception:
             pass
-        return {"view": str(view.Name), "elements": int(count),
-                "file_mtime": mtime}
+        return {"elements": int(count), "file_mtime": mtime}
     except Exception:
         return None
 
 
-def save_fingerprint(doc, cdir):
-    fp = _model_fingerprint(doc)
-    if fp is None:
+def save_fingerprint(doc, cdir, view=None):
+    if view is None:
+        view = _active_view(doc)
+    data = _view_meta(view) if view is not None else {}
+    data.update(_model_fingerprint(doc, view) or {})
+    if not data:
         return
+    data["loaded_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     try:
         f = open(os.path.join(cdir, _FINGERPRINT_NAME), "w")
         try:
-            json.dump(fp, f, indent=2)
+            json.dump(data, f, indent=2)
         finally:
             f.close()
     except Exception:
@@ -178,23 +308,48 @@ def _load_fingerprint(cdir):
         return None
 
 
-def staleness(doc):
-    """-> None when the cache looks fresh (or freshness is unknowable), else a
-    short human-readable reason it looks out of date."""
-    cdir, bundle_ref, _blend = cache_paths(doc)
-    if not os.path.isfile(bundle_ref):
-        return None
-    old = _load_fingerprint(cdir)
-    new = _model_fingerprint(doc)
+def _fp_diff(old, new):
+    """The model-content comparison shared by every staleness check."""
     if not old or not new:
         return None
-    if old.get("view") != new.get("view"):
-        return ("the active view is '%s' but '%s' was loaded"
-                % (new.get("view"), old.get("view")))
-    if old.get("elements") != new.get("elements"):
+    if old.get("elements") is not None and new.get("elements") is not None \
+            and old.get("elements") != new.get("elements"):
         return ("the model has changed (%s elements now vs %s at Load)"
                 % (new.get("elements"), old.get("elements")))
     if (old.get("file_mtime") and new.get("file_mtime")
             and old.get("file_mtime") != new.get("file_mtime")):
         return "the model file was saved since Load"
     return None
+
+
+def staleness(doc, view=None):
+    """-> None when a view's cache looks fresh (or freshness is unknowable),
+    else a short human-readable reason it looks out of date."""
+    cdir, bundle_ref, _blend = cache_paths(doc, view)
+    if not os.path.isfile(bundle_ref):
+        # Legacy per-doc slot: also compare the view name (the old single-slot
+        # cache held whatever view was loaded last).
+        root = bir_bootstrap.cache_dir_for(bir_bootstrap.doc_cache_key(doc))
+        if not os.path.isfile(os.path.join(root, SCENE_SPEC_FILENAME)):
+            return None
+        old = _load_fingerprint(root)
+        v = view if view is not None else _active_view(doc)
+        if old and v is not None:
+            try:
+                if old.get("view") and old.get("view") != str(v.Name):
+                    return ("the active view is '%s' but '%s' was loaded"
+                            % (v.Name, old.get("view")))
+            except Exception:
+                pass
+        return _fp_diff(old, _model_fingerprint(doc, view))
+    return _fp_diff(_load_fingerprint(cdir), _model_fingerprint(doc, view))
+
+
+def slot_staleness(doc, slot):
+    """Staleness for one Views-list slot: 'view deleted' when its view is gone,
+    else the fingerprint comparison against the live model. None = fresh."""
+    view = resolve_view(doc, slot.get("view_uid"))
+    if view is None and slot.get("view_uid"):
+        return "the view no longer exists in the model"
+    new = _model_fingerprint(doc, view) if view is not None else None
+    return _fp_diff(_load_fingerprint(slot["cache_dir"]), new)

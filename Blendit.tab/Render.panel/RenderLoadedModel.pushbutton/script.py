@@ -20,7 +20,9 @@ __author__ = "Blendit"
 import bir_bootstrap
 bir_bootstrap.ensure_paths()
 import bir_config
-from bir_ui import report as _report, launch_headless_render
+from bir_ui import (report as _report, launch_headless_render,
+                    dismiss_output as _dismiss_output)
 
 
-launch_headless_render(bir_config.load(), _report)
+if launch_headless_render(bir_config.load(), _report):
+    _dismiss_output(12)     # render continues detached; the PNG opens itself

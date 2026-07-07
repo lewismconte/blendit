@@ -35,6 +35,9 @@ class RenderMode(str, Enum):
     YELLOWTRACE = "yellowtrace"  # NPR loose sketch on yellow trace paper
     KRAFT = "kraft"           # NPR black ink + white accents on brown paper
     BLUEPRINT = "blueprint"   # NPR white line work on cyanotype blue
+    DIAGRAM = "diagram"       # NPR flat colour-block poster + heavy outline
+    WATERCOLOR = "watercolor"  # NPR loose sepia lines under a warm/cool wash
+    RISOGRAPH = "risograph"   # two-tone riso duotone (blue/pink/cream) + keyline
 
 
 # Canonical list of every render mode -- the SINGLE SOURCE OF TRUTH for the set of
@@ -95,6 +98,18 @@ class Material:
     ior: float = 1.45
     emissive: Optional[RGB] = None
     emissive_strength: float = 0.0
+    # --- appearance-asset fields (contract 0.2.0, all optional) ---
+    appearance_class: str = ""        # generic|metal|glass|ceramic|stone|masonry|
+                                      # concrete|wood|plastic|wallpaint|water|mirror
+    glossiness: Optional[float] = None  # raw Revit glossiness 0..1 (roughness = 1-g)
+    # Texture maps extracted from the appearance asset. Slots: "diffuse", "bump".
+    # Each slot: {"uri": str (bundle-relative, e.g. "textures/brick.jpg"),
+    #             "scale_m": [sx, sy] (real-world size of one tile, metres),
+    #             "offset_m": [ox, oy], "rotation_deg": float,
+    #             "amount": float (bump only)}.
+    # Revit gives NO UVs, so the Blender side maps these with real-world box
+    # projection (Object coords == metres) - which is how Revit itself maps them.
+    maps: Optional[dict] = None
 
 
 @dataclass
@@ -170,6 +185,7 @@ class World:
     hdri_uri: Optional[str] = None    # relative path when sky_type == HDRI
     strength: float = 1.0
     ground_albedo: RGB = field(default_factory=lambda: [0.3, 0.3, 0.3])
+    has_site: bool = False            # model brings its own terrain -> no ground plane
 
 
 @dataclass

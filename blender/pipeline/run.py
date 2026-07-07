@@ -85,6 +85,13 @@ def run_vector_pipeline(bundle_ref, out_path, fmt, overrides=None):
 
 
 def _render(out_path, spec):
+    # Freeze Line Art before rendering (no-op in non-line modes): baked strokes
+    # get the near-camera width clamp, and the render reuses the trace.
+    try:
+        from . import npr
+        npr.bake_line_art()
+    except Exception:
+        pass
     scene = bpy.context.scene
     scene.render.image_settings.file_format = "PNG"
     scene.render.filepath = out_path
@@ -101,15 +108,36 @@ def _apply_overrides(spec, overrides):
     if overrides.get("samples"):
         r["samples"] = int(overrides["samples"])
     if overrides.get("resolution"):
-        r["resolution"] = list(overrides["resolution"])
+        res = list(overrides["resolution"])
+        # A view framed to its Revit crop must keep the crop's ASPECT or the
+        # framing silently changes (a 16:9 config resolution on a square crop
+        # shows more/less than Revit did). Keep the override's long edge, fit
+        # the short edge to the crop.
+        asp = spec.get("camera", {}).get("crop_aspect")
+        if asp and str(spec.get("camera", {}).get("frame")) in ("crop", "view"):
+            res = _fit_resolution(res, float(asp))
+        r["resolution"] = res
     if overrides.get("denoise") is not None:
         r["denoise"] = bool(overrides["denoise"])
     if overrides.get("camera_type"):
         cam = spec.setdefault("camera", {})
-        # A loaded 2D view (plan / section / elevation) carries its own orthographic
-        # crop camera; the session's default 'perspective' must not clobber it.
-        if str(cam.get("frame")) != "crop":
+        # A view that carries its own exact frame - a loaded 2D crop (ortho) or a
+        # composed 3D view - must not have its projection clobbered by the
+        # session's default camera type.
+        if str(cam.get("frame")) not in ("crop", "view"):
             cam["type"] = str(overrides["camera_type"])
     if overrides.get("two_point") is not None:
         spec.setdefault("camera", {})["two_point_perspective"] = bool(
             overrides["two_point"])
+
+
+def _fit_resolution(res, aspect):
+    """Keep the long edge, set the short edge from `aspect` (width/height).
+    Mirrors the Revit-side revit_extract._fit_resolution."""
+    try:
+        long_edge = max(int(res[0]), int(res[1]))
+    except Exception:
+        long_edge = 1600
+    if aspect >= 1.0:
+        return [long_edge, max(1, int(round(long_edge / aspect)))]
+    return [max(1, int(round(long_edge * aspect))), long_edge]

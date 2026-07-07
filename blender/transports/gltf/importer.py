@@ -26,7 +26,15 @@ class GltfImporter(Importer):
         # side, and let Blender's importer convert back to Z-up (its default).
         # If instead you keep Z-up coords in the glTF, disable the importer's
         # conversion so the model isn't rotated 90 degrees.
-        bpy.ops.import_scene.gltf(filepath=payload)
+        # loglevel CRITICAL: the importer otherwise prints one "INFO: Blender
+        # create Mesh node" line PER OBJECT to the console - tens of thousands
+        # of lines on a big model, and the printing itself slows the import.
+        try:
+            import logging
+            bpy.ops.import_scene.gltf(filepath=payload,
+                                      loglevel=logging.CRITICAL)
+        except TypeError:   # older importer without the loglevel arg
+            bpy.ops.import_scene.gltf(filepath=payload)
         new_objs = [o for o in bpy.data.objects if o not in before]
         # SCALE: apply units.scale_to_meters ONCE to the whole import (geometry +
         # camera + sun distance are handled together by the pipeline, not here, to

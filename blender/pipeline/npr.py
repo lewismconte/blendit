@@ -84,6 +84,34 @@ def set_world_flat(color=(0.98, 0.98, 0.98), strength=1.0):
     nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
 
 
+def set_camera_ray_world(visible=(0.96, 0.92, 0.82), ambient=0.06, strength=1.0):
+    """A world that shows a flat `visible` paper colour to the CAMERA but contributes
+    only a dim neutral `ambient` to LIGHTING (via Light Path 'Is Camera Ray'). Lets a
+    flat paper backdrop sit behind a scene lit almost entirely by the sun - a wide,
+    clean light->shade range for posterised looks (riso) without a black sky."""
+    w = bpy.context.scene.world
+    if w is None:
+        w = bpy.data.worlds.new("World")
+        bpy.context.scene.world = w
+    w.use_nodes = True
+    nt = w.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputWorld")
+    out.location = (400, 0)
+    bg = nt.nodes.new("ShaderNodeBackground")
+    bg.location = (200, 0)
+    bg.inputs["Strength"].default_value = float(strength)
+    nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+    lp = nt.nodes.new("ShaderNodeLightPath")
+    lp.location = (-260, 220)
+    mix = nt.nodes.new("ShaderNodeMixRGB")
+    mix.location = (0, 0)
+    mix.inputs["Color1"].default_value = (ambient, ambient, ambient, 1.0)   # lighting rays
+    mix.inputs["Color2"].default_value = (visible[0], visible[1], visible[2], 1.0)  # camera
+    nt.links.new(lp.outputs["Is Camera Ray"], mix.inputs["Fac"])
+    nt.links.new(mix.outputs["Color"], bg.inputs["Color"])
+
+
 def _ground():
     return bpy.data.objects.get("BIR_Ground")
 
@@ -390,11 +418,58 @@ def _copy_drawing(src, dst):
         pass
 
 
+# Line width is WORLD-space (a 0.05 m pen), so strokes near the camera project
+# enormous in a deep street perspective - near-solid silhouettes. The clamp caps
+# every point's SCREEN width at what a stroke shows at `_NEAR_CLAMP` metres:
+# nearer points scale by distance/clamp (with a small floor so contact lines
+# don't vanish); everything at or beyond the clamp distance is untouched.
+# 0 disables. Depth cue, when the user enables it, REPLACES this policy (it
+# reassigns radii wholesale as an artistic choice).
+_NEAR_CLAMP = [10.0]
+_CLAMP_FLOOR = 0.12
+
+
+def set_near_clamp(metres):
+    _NEAR_CLAMP[0] = max(0.0, float(metres))
+
+
+def get_near_clamp():
+    return _NEAR_CLAMP[0]
+
+
+def clamp_screen_width():
+    """Scale down BAKED stroke radii near the camera (see _NEAR_CLAMP above)."""
+    near = _NEAR_CLAMP[0]
+    if near <= 0.0:
+        return
+    gp = bpy.data.objects.get(_GP_NAME)
+    cam = bpy.context.scene.camera
+    if gp is None or cam is None:
+        return
+    try:
+        cam_pos = cam.matrix_world.translation
+        mw = gp.matrix_world
+        for lay in gp.data.layers:
+            for frame in lay.frames:
+                for s in frame.drawing.strokes:
+                    for p in s.points:
+                        d = (mw @ p.position - cam_pos).length
+                        if d < near:
+                            p.radius = p.radius * max(d / near, _CLAMP_FLOOR)
+                try:
+                    frame.drawing.tag_positions_changed()
+                except Exception:
+                    pass
+    except Exception as ex:
+        print("Blendit: clamp_screen_width failed: %s" % ex)
+
+
 def bake_line_art():
     """Freeze the procedural Line Art into stored strokes + mute the modifier so it
     stops re-tracing on every eval / export / render. Done via the data API (no
     bpy.ops) so it's reliable in the live session's timer context. Returns True if
-    baked (or already baked); never fatal - on failure the modifier is left live."""
+    baked (or already baked); never fatal - on failure the modifier is left live.
+    Baked radii get the near-camera screen-width clamp (clamp_screen_width)."""
     gp = bpy.data.objects.get(_GP_NAME)
     if gp is None:
         return False
@@ -419,6 +494,7 @@ def bake_line_art():
         return False
     m.show_viewport = False
     m.show_render = False
+    clamp_screen_width()
     return True
 
 

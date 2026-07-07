@@ -70,14 +70,31 @@ def setup_camera(spec, scale):
     two_point = bool(cspec.get("two_point_perspective", False)) and not ortho
     aspect = _aspect(spec)
     margin = float(cspec.get("framing_margin", DEFAULT_MARGIN))
-    # A cropped 2D view from Revit (plan / section / elevation) carries its OWN
-    # reliable frame, so we honour the spec pose + ortho_scale instead of auto-fitting.
-    crop = ortho and str(cspec.get("frame", "fit")) == "crop"
+    frame = str(cspec.get("frame", "fit"))
+    # A view that carries its OWN reliable frame is reproduced exactly, never
+    # auto-fitted: "crop" = a cropped 2D plan/section/elevation; "view" = a
+    # composed 3D view (the user framed that shot in Revit - honour it).
+    crop = ortho and frame in ("crop", "view")
+    exact_persp = (not ortho) and frame == "view"
 
     _configure_lens(cam_data, cspec, ortho)
 
     if crop:
         _place_from_spec(cam_obj, cam_data, forward, up, scale, cspec)
+    elif exact_persp:
+        if two_point:
+            # Level the optical axis but KEEP the standpoint (dollying would
+            # change the composed shot more than the leveling fixes).
+            leveled = _level(forward)
+            if leveled is not None:
+                forward, up = leveled, mathutils.Vector((0.0, 0.0, 1.0))
+        pos = _vec(cspec.get("position", [0.0, 0.0, 0.0]), scale)
+        _set_pose(cam_obj, pos, forward, up)
+        # HORIZONTAL fit: fov_degrees is the crop's horizontal angle and the
+        # extracted shifts are offset/width - keep both true in any orientation.
+        cam_data.sensor_fit = "HORIZONTAL"
+        cam_data.shift_x = float(cspec.get("shift_x", 0.0))
+        cam_data.shift_y = float(cspec.get("shift_y", 0.0))
     else:
         if two_point:
             leveled = _level(forward)
@@ -100,13 +117,10 @@ def setup_camera(spec, scale):
     return cam_obj
 
 
-def _place_from_spec(cam_obj, cam_data, forward, up_hint, scale, cspec):
-    """Place an ORTHO camera from the spec's own pose + ortho_scale (a cropped 2D
-    Revit view), skipping the geometry auto-fit. Uses a HORIZONTAL sensor fit so
-    ortho_scale spans the sheet width (the crop rectangle's width), and builds the
-    pose from an explicit (right, up, back) basis so page-up is exact even looking
-    straight down in a plan."""
-    pos = _vec(cspec.get("position", [0.0, 0.0, 0.0]), scale)
+def _set_pose(cam_obj, pos, forward, up_hint):
+    """Pose the camera at `pos` looking along `forward` with `up_hint`, from an
+    explicit (right, up, back) basis - exact even looking straight down (where
+    to_track_quat's up is degenerate) and roll-faithful to the source view."""
     right = forward.cross(up_hint)
     if right.length < 1e-9:
         right = forward.cross(mathutils.Vector((0.0, 0.0, 1.0)))
@@ -120,6 +134,16 @@ def _place_from_spec(cam_obj, cam_data, forward, up_hint, scale, cspec):
         (right.z, true_up.z, -forward.z),
     )).to_4x4()
     cam_obj.matrix_world = mathutils.Matrix.Translation(pos) @ rot
+    return right, true_up
+
+
+def _place_from_spec(cam_obj, cam_data, forward, up_hint, scale, cspec):
+    """Place an ORTHO camera from the spec's own pose + ortho_scale (a cropped 2D
+    Revit view or a composed 3D ortho view), skipping the geometry auto-fit. Uses
+    a HORIZONTAL sensor fit so ortho_scale spans the frame width (the crop
+    rectangle's width)."""
+    pos = _vec(cspec.get("position", [0.0, 0.0, 0.0]), scale)
+    right, true_up = _set_pose(cam_obj, pos, forward, up_hint)
     cam_data.sensor_fit = "HORIZONTAL"
     cam_data.shift_x = 0.0
     cam_data.shift_y = 0.0

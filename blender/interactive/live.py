@@ -94,7 +94,8 @@ def _parse_args():
     p.add_argument("--mode",
                    choices=["realistic", "white", "shadow", "specular",
                             "linework", "pen", "sketch", "cel", "hatch",
-                            "yellowtrace", "kraft", "blueprint"])
+                            "yellowtrace", "kraft", "blueprint",
+                            "diagram", "watercolor", "risograph"])
     return p.parse_args(args)
 
 
@@ -244,6 +245,9 @@ def _set_nav_prefs():
     try:
         prefs = bpy.context.preferences
         prefs.use_preferences_save = False          # session-only; saved prefs untouched
+        # No splash over the loaded model: --python runs before the first draw, so
+        # setting this here means it never appears (session-only, like the rest).
+        prefs.view.show_splash = False
         inp = prefs.inputs
         # Auto Depth OFF. With lock-camera framing it takes the pan/orbit pivot from
         # the depth UNDER THE CURSOR; the model is small and ringed by empty space, so
@@ -514,6 +518,16 @@ def _update_depth_cue(self, context):
         _run_busy("Resetting line weight", _do_regenerate_lines)   # re-bake = uniform
 
 
+def _update_near_clamp(self, context):
+    if _SYNCING:
+        return
+    from blender.pipeline import npr
+    npr.set_near_clamp(self.line_near_clamp)
+    if npr.is_line_art_baked():
+        # the clamp is applied at bake time - re-bake with the new distance
+        _run_busy("Re-clamping line width", _do_regenerate_lines)
+
+
 def _update_engine(self, context):
     if _SYNCING:
         return
@@ -714,11 +728,14 @@ _MODE_ITEMS = [
     ("yellowtrace", "Yellowtrace", "Loose sketch on yellow trace paper"),
     ("kraft", "Brown Paper", "Black ink + white accents on kraft paper"),
     ("blueprint", "Blueprint", "White line work on cyanotype blue"),
+    ("diagram", "Diagram", "Flat colour-block poster + heavy outline"),
+    ("watercolor", "Watercolor", "Warm/cool wash under loose sepia lines"),
+    ("risograph", "Risograph", "Two-tone riso print (blue/pink/cream) + keyline"),
 ]
 
 _LIT_MODES = ("realistic", "white", "shadow", "specular")
 _LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch", "yellowtrace",
-               "kraft", "blueprint")
+               "kraft", "blueprint", "diagram", "watercolor", "risograph")
 # Modes where real materials (and therefore textures) are visible. White/Shadow are
 # clay overrides; the NPR modes are line / flat. Kept in sync with material_library.
 _TEXTURED_MODES = ("realistic", "specular")
@@ -1076,6 +1093,13 @@ class BIR_Settings(bpy.types.PropertyGroup):
         description="Tier line weight by distance: near edges thick + dark, far "
                     "edges thin + pale (survives SVG / PDF export). Applies on "
                     "Regenerate", update=_update_depth_cue)
+    line_near_clamp: bpy.props.FloatProperty(
+        name="Near Clamp", default=10.0, min=0.0, max=100.0, subtype="DISTANCE",
+        description="Cap how wide lines close to the camera can render: nothing "
+                    "draws wider than a line this many metres away would (stops "
+                    "near-camera edges going solid black in deep perspectives). "
+                    "0 = off. Depth Cue replaces this when enabled",
+        update=_update_near_clamp)
     final_samples: bpy.props.IntProperty(
         name="Final Samples", default=200, min=16, max=4096,
         description="Render samples for Render Final (higher = cleaner, slower)")
@@ -1217,7 +1241,8 @@ def _apply_material_override(item):
         return
     from blender.pipeline import materials as M
     from blender.pipeline.merge import MERGED_PREFIX
-    mat = M.build_material(rec, engine=st.engine, surface=item.surface)
+    mat = M.build_material(rec, engine=st.engine, surface=item.surface,
+                           base_dir=_SPEC.get("_override_dir"))
     obj = bpy.data.objects.get(MERGED_PREFIX + str(item.mat_id))
     if obj is not None:
         obj.data.materials.clear()
@@ -1503,7 +1528,7 @@ def _batch_steps():
 
 # --- contact sheet ------------------------------------------------------------
 _SHEET_COLS = 3
-_SHEET_CELL_LONG = 480   # cell long edge in px (9 cells -> ~1.5k sheet)
+_SHEET_CELL_LONG = 480   # cell long edge in px (12 cells -> 3x4 grid, ~1.5k wide)
 
 
 def _stitch_grid(paths, cols, out_path, pad=6):
@@ -1539,7 +1564,7 @@ def _stitch_grid(paths, cols, out_path, pad=6):
 
 def _contact_steps():
     """Render the CURRENT shot small in every mode, one mode per tick, then
-    stitch the nine cells into a single grid PNG - 'which look should this
+    stitch the fifteen cells into a single grid PNG - 'which look should this
     be?' answered in one image."""
     global _STATUS
     import tempfile
@@ -1860,7 +1885,7 @@ class BIR_OT_bookmark_render_all(bpy.types.Operator):
 class BIR_OT_contact_sheet(bpy.types.Operator):
     bl_idname = "bir.contact_sheet"
     bl_label = "Contact Sheet"
-    bl_description = ("Render THIS shot in all nine looks as one grid image - "
+    bl_description = ("Render THIS shot in all fifteen looks as one grid image - "
                       "pick a style (or send options) from a single PNG")
 
     def execute(self, context):
@@ -1954,7 +1979,7 @@ class BIR_PT_main(bpy.types.Panel):
         col.operator("bir.render_image", text="Capture", icon="RENDER_STILL")
         col.operator("bir.render_final", text="Render Final", icon="RENDER_STILL")
         col.scale_y = 1.0
-        col.operator("bir.contact_sheet", text="Contact Sheet (9 looks)",
+        col.operator("bir.contact_sheet", text="Contact Sheet (15 looks)",
                      icon="IMGDISPLAY")
         row = col.row(align=True)
         row.operator("bir.open_captures", text="Open Captures", icon="FILE_FOLDER")
@@ -2084,7 +2109,7 @@ class BIR_PT_lines(_Sub, bpy.types.Panel):
         layout = self.layout
         layout.prop(st, "line_thickness", slider=True)   # outline weight (live)
         layout.prop(st, "line_color", text="")           # live colour
-        if st.mode in ("sketch", "yellowtrace"):
+        if st.mode in ("sketch", "yellowtrace", "watercolor"):
             layout.prop(st, "sketch_amount", slider=True)
             layout.prop(st, "sketch_overshoot", slider=True)
         if st.mode == "cel":
@@ -2126,6 +2151,7 @@ class BIR_PT_lines_adv(_Sub, bpy.types.Panel):
         r.prop(st, "line_intersection", toggle=True)
         r.prop(st, "line_occlusion", toggle=True)
         layout.prop(st, "depth_cue", toggle=True, icon="MOD_THICKNESS")
+        layout.prop(st, "line_near_clamp", slider=True)
         layout.label(text="Apply with Regenerate.", icon="INFO")
 
 
@@ -2914,7 +2940,22 @@ def _build_steps():
         _apply_overrides(_SPEC, overrides)
     else:
         # FRESH IMPORT: bring geometry in, cache the clean scene, then prepare.
-        yield "Importing geometry"
+        # The import is one blocking op (no mid-import ticks possible), so the
+        # banner at least says how big the wait is.
+        n_elements = 0
+        try:
+            from bir_contract.transport import read_scene_spec
+            n_elements = len(read_scene_spec(ns.bundle)
+                             .get("geometry", {}).get("elements", []))
+        except Exception:
+            pass
+        if n_elements > 5000:
+            yield ("Importing geometry (%s elements - a few minutes; "
+                   "Blender may say Not Responding)" % "{:,}".format(n_elements))
+        elif n_elements:
+            yield "Importing geometry (%s elements)" % "{:,}".format(n_elements)
+        else:
+            yield "Importing geometry"
         _LOADED, _SPEC = import_scene(ns.bundle, overrides=overrides or None)
         if ns.save_blend:
             yield "Caching scene for fast reopen"
