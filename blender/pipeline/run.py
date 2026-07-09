@@ -15,6 +15,7 @@ from .ground import add_ground
 from .engine import setup_engine
 from . import presets  # noqa: F401  (registers all presets on import)
 from .presets.registry import get_preset
+from bir_contract.transport import fit_resolution
 
 
 def import_scene(bundle_ref, overrides=None):
@@ -115,7 +116,7 @@ def _apply_overrides(spec, overrides):
         # the short edge to the crop.
         asp = spec.get("camera", {}).get("crop_aspect")
         if asp and str(spec.get("camera", {}).get("frame")) in ("crop", "view"):
-            res = _fit_resolution(res, float(asp))
+            res = fit_resolution(res, float(asp))
         r["resolution"] = res
     if overrides.get("denoise") is not None:
         r["denoise"] = bool(overrides["denoise"])
@@ -129,15 +130,3 @@ def _apply_overrides(spec, overrides):
     if overrides.get("two_point") is not None:
         spec.setdefault("camera", {})["two_point_perspective"] = bool(
             overrides["two_point"])
-
-
-def _fit_resolution(res, aspect):
-    """Keep the long edge, set the short edge from `aspect` (width/height).
-    Mirrors the Revit-side revit_extract._fit_resolution."""
-    try:
-        long_edge = max(int(res[0]), int(res[1]))
-    except Exception:
-        long_edge = 1600
-    if aspect >= 1.0:
-        return [long_edge, max(1, int(round(long_edge / aspect)))]
-    return [max(1, int(round(long_edge * aspect))), long_edge]

@@ -77,6 +77,21 @@ def stamped_name(prefix, ext):
     return "%s_%s.%s" % (prefix, timestamp(), str(ext).lstrip("."))
 
 
+def fit_resolution(res, aspect):
+    # (list[int, int], float) -> list[int, int]
+    # Keep the long edge; set the short edge from `aspect` (width/height). Shared so
+    # the Revit-side extraction and the Blender-side override refit stay identical -
+    # a view framed to its crop must keep the crop's aspect or the framing silently
+    # changes. IronPython-2.7 + CPython safe (plain int/round/max).
+    try:
+        long_edge = max(int(res[0]), int(res[1]))
+    except Exception:
+        long_edge = 1600
+    if aspect >= 1.0:
+        return [long_edge, max(1, int(round(long_edge / aspect)))]
+    return [max(1, int(round(long_edge * aspect))), long_edge]
+
+
 class MeshData(object):
     """What Revit extraction hands to a file-based exporter. Pure container so
     'extract from Revit' (RevitAPI) is decoupled from 'write payload' (testable).

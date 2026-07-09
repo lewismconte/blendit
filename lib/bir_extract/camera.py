@@ -69,14 +69,18 @@ def extract_camera(view3d):
             else:
                 cam["ortho_scale"] = _ortho_scale(view3d)   # auto-fit fallback
         elif posed:
-            cam["frame"] = "view"               # exact pose; frustum from the crop box
             fov, asp, sx, sy = _perspective_frustum(view3d)
             if fov is not None:
+                # A readable frustum -> reproduce the composed shot exactly.
+                cam["frame"] = "view"           # exact pose; frustum from the crop box
                 cam["fov_degrees"] = fov
                 cam["shift_x"] = sx             # the crop's asymmetry = lens shift
                 cam["shift_y"] = sy
-            if asp is not None:
-                cam["crop_aspect"] = asp
+                if asp is not None:
+                    cam["crop_aspect"] = asp
+            # else: no reliable frustum -> leave frame unset so Blender auto-fits the
+            # geometry from the view angle (the documented "unreadable -> fit" fallback),
+            # rather than planting the exact eye behind a guessed 50 deg lens.
     except Exception:
         pass
     return cam

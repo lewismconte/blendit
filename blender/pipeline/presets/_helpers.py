@@ -38,19 +38,15 @@ def set_sun_energy(absolute):
 
 
 def aim_sun(alt_deg, az_deg):
-    """Re-aim the key light to a chosen altitude/azimuth (matches world.py's
-    convention: +Y North, +X East). For stylised looks that want a flattering
-    raking key (e.g. riso, which needs a wide light->shade range to band cleanly)
-    rather than the site-accurate sun."""
-    import math
-    import mathutils
+    """Re-aim the key light to a chosen altitude/azimuth. For stylised looks that
+    want a flattering raking key (e.g. riso, which needs a wide light->shade range
+    to band cleanly) rather than the site-accurate sun. Uses world._to_sun_vector so
+    the +Y North / +X East convention can never drift from the geographic sun."""
+    from ..world import _to_sun_vector
     s = sun_object()
     if s is None:
         return
-    alt, az = math.radians(alt_deg), math.radians(az_deg)
-    to_sun = mathutils.Vector((math.cos(alt) * math.sin(az),
-                               math.cos(alt) * math.cos(az),
-                               math.sin(alt))).normalized()
+    to_sun = _to_sun_vector(alt_deg, az_deg)
     s.rotation_euler = (-to_sun).to_track_quat("-Z", "Y").to_euler()
 
 
@@ -133,6 +129,17 @@ def set_gradient_world(zenith=0.35, horizon=0.78, strength=1.0):
     els[1].position, els[1].color = 1.00, (zenith,) * 3 + (1.0,)
     nt.links.new(remap.outputs["Value"], ramp.inputs["Fac"])
     nt.links.new(ramp.outputs["Color"], bg.inputs["Color"])
+
+
+def set_ground_material(mat):
+    """Replace the shadow-catcher ground's material outright (the flat-fill NPR
+    modes - riso / watercolor - paint the ground in their own ink so the cast
+    shadow becomes a coloured band / wash pool rather than a grey blob)."""
+    g = bpy.data.objects.get("BIR_Ground")
+    if g is None or getattr(g, "type", None) != "MESH":
+        return
+    g.data.materials.clear()
+    g.data.materials.append(mat)
 
 
 def set_ground_tone(value):

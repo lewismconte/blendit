@@ -29,11 +29,8 @@ def _parse_args():
                    help="path to scene_spec.json or the bundle directory")
     p.add_argument("--out", required=True, help="output PNG path")
     p.add_argument("--engine", choices=["CYCLES", "EEVEE"])
-    p.add_argument("--mode",
-                   choices=["realistic", "white", "shadow", "linework", "specular",
-                            "pen", "sketch", "cel", "hatch", "yellowtrace",
-                            "kraft", "blueprint", "diagram", "watercolor",
-                            "risograph"])
+    from bir_contract.scene_spec import RENDER_MODES
+    p.add_argument("--mode", choices=list(RENDER_MODES))
     p.add_argument("--samples", type=int)
     p.add_argument("--resolution", nargs=2, type=int, metavar=("W", "H"),
                    help="override the output resolution")
@@ -49,10 +46,6 @@ def _parse_args():
     p.add_argument("--open", action="store_true",
                    help="open the result when done (so the launcher needn't wait)")
     return p.parse_args(args)
-
-
-_LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch", "yellowtrace",
-               "kraft", "blueprint", "diagram", "watercolor", "risograph")
 
 
 def _fmt_duration(seconds):
@@ -153,8 +146,9 @@ def main():
 
     # Vector export: build in a line mode and write SVG / PDF instead of a PNG.
     if ns.vector:
+        from blender.pipeline.presets.registry import LINE_MODES
         mode = ns.mode or "linework"
-        if mode not in _LINE_MODES:
+        if mode not in LINE_MODES:
             sys.stderr.write("--vector needs a line mode "
                              "(linework/pen/sketch/cel/hatch); got --mode %s\n" % mode)
             sys.exit(2)

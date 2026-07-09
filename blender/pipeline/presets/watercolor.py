@@ -16,6 +16,9 @@ from . import _helpers
 from .. import npr
 from ..materials import override_all
 
+_ZENITH = (0.60, 0.71, 0.86)    # cool blue at the top of frame
+_HORIZON = (0.98, 0.95, 0.87)   # warm cream at the bottom
+
 
 def _watercolor_material(name="BIR_Watercolor"):
     mat = bpy.data.materials.new(name)
@@ -53,7 +56,7 @@ def _watercolor_material(name="BIR_Watercolor"):
     m1.color = (0.50, 0.54, 0.63, 1.0)                          # cool grey-blue mid
     m2 = e.new(0.66)
     m2.color = (0.87, 0.71, 0.49, 1.0)                          # richer warm sienna mid
-    link(bw.outputs["Val"], ramp.inputs["Factor"])
+    link(bw.outputs["Val"], ramp.inputs["Fac"])
     wash = ramp.outputs["Color"]
 
     tc = add("ShaderNodeTexCoord")
@@ -71,7 +74,7 @@ def _watercolor_material(name="BIR_Watercolor"):
     paper_r.color_ramp.elements[0].color = (0.92, 0.92, 0.92, 1.0)
     paper_r.color_ramp.elements[1].position = 0.72
     paper_r.color_ramp.elements[1].color = (1.0, 1.0, 1.0, 1.0)
-    link(paper_n.outputs["Factor"], paper_r.inputs["Factor"])
+    link(paper_n.outputs["Fac"], paper_r.inputs["Fac"])
 
     # --- granulation: object-space pigment settling (bigger, softer) ---
     gran_n = add("ShaderNodeTexNoise")
@@ -85,19 +88,19 @@ def _watercolor_material(name="BIR_Watercolor"):
     gran_r.color_ramp.elements[0].color = (0.88, 0.88, 0.88, 1.0)
     gran_r.color_ramp.elements[1].position = 0.78
     gran_r.color_ramp.elements[1].color = (1.0, 1.0, 1.0, 1.0)
-    link(gran_n.outputs["Factor"], gran_r.inputs["Factor"])
+    link(gran_n.outputs["Fac"], gran_r.inputs["Fac"])
 
     # wash * paper * granulation
     mul1 = add("ShaderNodeMixRGB")
     mul1.location = (-260, 40)
     mul1.blend_type = "MULTIPLY"
-    mul1.inputs["Factor"].default_value = 1.0
+    mul1.inputs["Fac"].default_value = 1.0
     link(wash, mul1.inputs["Color1"])
     link(paper_r.outputs["Color"], mul1.inputs["Color2"])
     mul2 = add("ShaderNodeMixRGB")
     mul2.location = (-60, 40)
     mul2.blend_type = "MULTIPLY"
-    mul2.inputs["Factor"].default_value = 1.0
+    mul2.inputs["Fac"].default_value = 1.0
     link(mul1.outputs["Color"], mul2.inputs["Color1"])
     link(gran_r.outputs["Color"], mul2.inputs["Color2"])
     textured = mul2.outputs["Color"]
@@ -121,7 +124,7 @@ def _watercolor_material(name="BIR_Watercolor"):
     edgemix = add("ShaderNodeMixRGB")
     edgemix.location = (500, 160)
     edgemix.blend_type = "MIX"
-    link(edge_r.outputs["Color"], edgemix.inputs["Factor"])
+    link(edge_r.outputs["Color"], edgemix.inputs["Fac"])
     link(textured, edgemix.inputs["Color1"])
     link(darkpig.outputs["Color"], edgemix.inputs["Color2"])
 
@@ -134,49 +137,6 @@ def _watercolor_material(name="BIR_Watercolor"):
     return mat
 
 
-def _sky_wash_world(zenith=(0.60, 0.71, 0.86), horizon=(0.98, 0.95, 0.87),
-                    ambient=0.22):
-    """A soft watercolour sky: a cool blue zenith washing down to a warm cream
-    horizon for the CAMERA, but only a dim neutral `ambient` for LIGHTING (Light
-    Path 'Is Camera Ray') so the sun still shapes the pigment ramp cleanly."""
-    w = bpy.context.scene.world
-    if w is None:
-        w = bpy.data.worlds.new("World")
-        bpy.context.scene.world = w
-    w.use_nodes = True
-    nt = w.node_tree
-    nt.nodes.clear()
-    add, link = nt.nodes.new, nt.links.new
-    out = add("ShaderNodeOutputWorld")
-    out.location = (600, 0)
-    bg = add("ShaderNodeBackground")
-    bg.location = (400, 0)
-    link(bg.outputs["Background"], out.inputs["Surface"])
-    # Vertical screen-space gradient (Window.Y): reliable in EEVEE where the world
-    # ray-direction coords aren't. Bottom of frame = warm horizon, top = cool zenith.
-    tc = add("ShaderNodeTexCoord")
-    tc.location = (-600, -200)
-    sep = add("ShaderNodeSeparateXYZ")
-    sep.location = (-420, -200)
-    link(tc.outputs["Window"], sep.inputs["Vector"])
-    ramp = add("ShaderNodeValToRGB")
-    ramp.location = (-80, -200)
-    ramp.color_ramp.interpolation = "EASE"
-    ramp.color_ramp.elements[0].position = 0.42
-    ramp.color_ramp.elements[0].color = horizon + (1.0,)
-    ramp.color_ramp.elements[1].position = 0.95
-    ramp.color_ramp.elements[1].color = zenith + (1.0,)
-    link(sep.outputs["Y"], ramp.inputs["Factor"])
-    lp = add("ShaderNodeLightPath")
-    lp.location = (-80, 220)
-    mix = add("ShaderNodeMixRGB")
-    mix.location = (180, 0)
-    mix.inputs["Color1"].default_value = (ambient, ambient, ambient, 1.0)
-    link(lp.outputs["Is Camera Ray"], mix.inputs["Factor"])
-    link(ramp.outputs["Color"], mix.inputs["Color2"])
-    link(mix.outputs["Color"], bg.inputs["Color"])
-
-
 def apply(loaded, spec):
     spec.setdefault("render", {})["engine"] = "EEVEE"
     _helpers.disable_freestyle()
@@ -184,14 +144,11 @@ def apply(loaded, spec):
     mat = _watercolor_material()
     override_all(loaded, mat)
     # Same wash on the ground, so the building's cast shadow becomes a cool wash pool.
-    g = bpy.data.objects.get("BIR_Ground")
-    if g is not None and getattr(g, "type", None) == "MESH":
-        g.data.materials.clear()
-        g.data.materials.append(mat)
+    _helpers.set_ground_material(mat)
     npr.show_ground()
     # A soft blue->cream watercolour sky behind it (dim to the lighting, so the sun
     # still shapes the pigment ramp cleanly).
-    _sky_wash_world(ambient=0.20)
+    npr.set_camera_ray_world(gradient=(_HORIZON, _ZENITH), ambient=0.20)
     _helpers.aim_sun(42.0, 205.0)                  # front catches warm light, a side stays
     _helpers.set_sun_energy(3.6)                   # cool -> a warm/cool balance across the form
     _helpers.set_sun_softness(2.0)

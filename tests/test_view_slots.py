@@ -57,12 +57,18 @@ def main():
         doc = FakeDoc({"uid-plan-001": plan})
 
         # --- slots: distinct per view, stable per view, rename-stable ----------
-        d1 = bir_export.cache_paths(doc, plan)[0]
-        d2 = bir_export.cache_paths(doc, three_d)[0]
+        # create=True is the write path (Load View); the read-only re-lookups below
+        # must return the same path without needing the dir.
+        d1 = bir_export.cache_paths(doc, plan, create=True)[0]
+        d2 = bir_export.cache_paths(doc, three_d, create=True)[0]
         check("two views get two slots", d1 != d2)
         check("slots live under <doc>/views/", os.sep + "views" + os.sep in d1)
         check("same view resolves to the same slot",
               bir_export.cache_paths(doc, plan)[0] == d1)
+        check("read-only cache_paths does not create the slot dir",
+              bir_export.cache_paths(FakeDoc(), FakeView("Unloaded", "uid-x"))[0]
+              and not os.path.isdir(bir_export.cache_paths(
+                  FakeDoc(), FakeView("Unloaded", "uid-x"))[0]))
         renamed = FakeView("Level 1 - RENAMED", "uid-plan-001")
         check("renaming a view keeps its slot",
               bir_export.cache_paths(doc, renamed)[0] == d1)

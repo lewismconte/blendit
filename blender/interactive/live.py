@@ -734,8 +734,8 @@ _MODE_ITEMS = [
 ]
 
 _LIT_MODES = ("realistic", "white", "shadow", "specular")
-_LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch", "yellowtrace",
-               "kraft", "blueprint", "diagram", "watercolor", "risograph")
+# Single source of truth (shared with the headless renderer) - no local copy to drift.
+from blender.pipeline.presets.registry import LINE_MODES as _LINE_MODES  # noqa: E402
 # Modes where real materials (and therefore textures) are visible. White/Shadow are
 # clay overrides; the NPR modes are line / flat. Kept in sync with material_library.
 _TEXTURED_MODES = ("realistic", "specular")

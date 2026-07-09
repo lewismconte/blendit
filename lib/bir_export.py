@@ -102,10 +102,15 @@ def _active_view(doc):
         return None
 
 
-def cache_paths(doc, view=None):
+def cache_paths(doc, view=None, create=False):
     """-> (cache_dir, bundle_ref, blend_path) for one VIEW of this document
     (`view` None = the active view). Falls back to the legacy per-doc root when
-    no view can be resolved (headless / tests / non-loadable active view)."""
+    no view can be resolved (headless / tests / non-loadable active view).
+
+    `create` makes the slot directory; the WRITE path (refresh_cache) passes it. The
+    read-only queries (cached_bundle / staleness, called on every ribbon refresh for
+    whatever view is active) leave it False so merely inspecting a not-yet-loaded
+    view never litters an empty slot dir under the cache root."""
     root = bir_bootstrap.cache_dir_for(bir_bootstrap.doc_cache_key(doc))
     if view is None:
         view = _active_view(doc)
@@ -113,7 +118,7 @@ def cache_paths(doc, view=None):
         cdir = root
     else:
         cdir = os.path.join(root, "views", bir_bootstrap.view_cache_key(view))
-        if not os.path.isdir(cdir):
+        if create and not os.path.isdir(cdir):
             try:
                 os.makedirs(cdir)
             except Exception:
@@ -141,7 +146,7 @@ def refresh_cache(doc, cfg, report, view=None):
     and invalidate that slot's prepared .blend. -> (bundle_ref, blend_path)."""
     if view is None:
         view = _active_view(doc)
-    cdir, bundle_ref, blend_path = cache_paths(doc, view)
+    cdir, bundle_ref, blend_path = cache_paths(doc, view, create=True)
     bundle_ref, _ = export_bundle_with_progress(doc, cfg, report,
                                                 out_dir=cdir, view=view)
     try:

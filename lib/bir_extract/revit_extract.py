@@ -8,7 +8,7 @@ actually called with a live doc.
 """
 import datetime
 
-from bir_contract.transport import CONTRACT_VERSION
+from bir_contract.transport import CONTRACT_VERSION, fit_resolution
 from bir_extract import _compat
 
 DB = _compat.DB
@@ -73,7 +73,7 @@ def build_scene_spec(doc, view, render_overrides=None, progress=None):
     render = _render(render_overrides)
     asp = cam.get("crop_aspect")            # match the frame to the crop rectangle
     if asp:
-        render["resolution"] = _fit_resolution(render.get("resolution"), asp)
+        render["resolution"] = fit_resolution(render.get("resolution"), asp)
 
     spec = {
         "contract_version": CONTRACT_VERSION,
@@ -89,22 +89,19 @@ def build_scene_spec(doc, view, render_overrides=None, progress=None):
                   "ground_albedo": [0.3, 0.3, 0.3],
                   # The model brings its own terrain (site link / toposolid):
                   # the Blender side then skips the artificial ground plane.
-                  "has_site": _detect_site(elements, link_docs)},
+                  "has_site": _detect_site(elements)},
         "render": render,
     }
     return spec, meshes
 
 
-def _detect_site(elements, link_docs):
-    """True when the extraction carries real site geometry - a linked model
-    whose name says 'site', or host topography / toposolids."""
+def _detect_site(elements):
+    """True when the extraction carries real terrain: topography or a toposolid
+    (host OR linked - view_export/geometry tag link elements with their real Revit
+    category). Keyed off actual geometry, NOT a link's file name: a link merely
+    named '...site...' with no terrain must still get the shadow-catcher ground, or
+    the building floats."""
     try:
-        for ldoc in (link_docs or {}).values():
-            try:
-                if "site" in str(ldoc.Title).lower():
-                    return True
-            except Exception:
-                pass
         for e in elements or []:
             cat = str(e.get("category", "")).lower()
             if "topograph" in cat or "toposolid" in cat:
@@ -112,17 +109,6 @@ def _detect_site(elements, link_docs):
     except Exception:
         pass
     return False
-
-
-def _fit_resolution(res, aspect):
-    """Keep the long edge, set the short edge from `aspect` (width/height)."""
-    try:
-        long_edge = max(int(res[0]), int(res[1]))
-    except Exception:
-        long_edge = 1600
-    if aspect >= 1.0:
-        return [long_edge, max(1, int(round(long_edge / aspect)))]
-    return [max(1, int(round(long_edge * aspect))), long_edge]
 
 
 def _render(overrides):

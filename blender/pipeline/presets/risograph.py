@@ -49,6 +49,7 @@ def _riso_material(name="BIR_Riso"):
     cr.elements[1].color = _CREAM + (1.0,)
     mid = cr.elements.new(0.26)
     mid.color = _PINK + (1.0,)
+    nt.links.new(bw.outputs["Val"], ramp.inputs["Fac"])   # lit tone drives the bands
     emi = nt.nodes.new("ShaderNodeEmission")
     emi.location = (440, 0)
     nt.links.new(ramp.outputs["Color"], emi.inputs["Color"])
@@ -64,10 +65,7 @@ def apply(loaded, spec):
     override_all(loaded, mat)
     # Same ink treatment on the ground, so the building's cast shadow becomes a
     # coloured band rather than a grey blob.
-    g = bpy.data.objects.get("BIR_Ground")
-    if g is not None and getattr(g, "type", None) == "MESH":
-        g.data.materials.clear()
-        g.data.materials.append(mat)
+    _helpers.set_ground_material(mat)
     npr.show_ground()
     # Flat cream paper to the camera, near-black to lighting -> the sun alone shapes a
     # wide light->shade range, so all three ink bands appear (not one flat mid tone).

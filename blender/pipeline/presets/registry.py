@@ -7,6 +7,14 @@ without Blender.
 """
 _PRESETS = {}
 
+# The stylised drawing/print modes (Grease Pencil Line Art present -> vector export
+# possible, line-specific UI applies). SINGLE SOURCE OF TRUTH: both the headless
+# renderer and the interactive session import this instead of keeping their own
+# copies (which silently drifted). Kept here (bpy-free) so it can be listed without
+# Blender; tests/ assert it stays a subset of bir_contract's RENDER_MODES.
+LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch", "yellowtrace",
+              "kraft", "blueprint", "diagram", "watercolor", "risograph")
+
 
 def register_preset(name, fn):
     _PRESETS[name] = fn

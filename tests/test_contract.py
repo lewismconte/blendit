@@ -9,6 +9,7 @@ Locks four things so they can't silently drift:
 Run standalone:   python tests/test_contract.py
 Or under pytest:  pytest tests/test_contract.py
 """
+import importlib.util
 import json
 import os
 import re
@@ -60,6 +61,43 @@ def test_revit_config_modes_match_render_modes():
         % (sorted(bir_config.MODE_LABELS), sorted(bir_config.MODES)))
 
 
+def _load_registry():
+    # registry.py is self-contained (no imports), so load it in isolation - going
+    # through blender.pipeline.presets would run that package __init__, which imports
+    # bpy. This keeps the check plain-CPython.
+    path = os.path.join(_ROOT, "blender", "pipeline", "presets", "registry.py")
+    spec = importlib.util.spec_from_file_location("_bir_registry_probe", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_line_modes_are_render_modes():
+    # LINE_MODES is the single source both the headless renderer and the interactive
+    # session import; it must be a subset of the canonical modes, with no dupes.
+    reg = _load_registry()
+    line = set(reg.LINE_MODES)
+    assert line <= set(scene_spec.RENDER_MODES), (
+        "LINE_MODES %s not all in RENDER_MODES %s"
+        % (sorted(line), sorted(scene_spec.RENDER_MODES)))
+    assert len(reg.LINE_MODES) == len(line), "duplicate mode in LINE_MODES"
+
+
+def test_live_mode_items_cover_render_modes():
+    # The interactive N-panel mode dropdown (_MODE_ITEMS) is hand-labelled, so a new
+    # mode can be added to the contract but forgotten here (silently absent from the
+    # session UI). Text-scan its ids - no bpy needed.
+    path = os.path.join(_ROOT, "blender", "interactive", "live.py")
+    with open(path) as f:
+        src = f.read()
+    m = re.search(r"_MODE_ITEMS\s*=\s*\[(.*?)\]", src, re.S)
+    assert m, "could not find _MODE_ITEMS in live.py"
+    ids = set(re.findall(r'\(\s*"([a-z]+)"\s*,', m.group(1)))
+    assert ids == set(scene_spec.RENDER_MODES), (
+        "live.py _MODE_ITEMS %s != RENDER_MODES %s"
+        % (sorted(ids), sorted(scene_spec.RENDER_MODES)))
+
+
 def test_ribbon_has_a_button_per_mode():
     # Every render mode gets a pushbutton in the Mode pulldown (each script calls
     # bir_ui.set_mode("<key>")), so the ribbon can't silently miss a mode.
@@ -82,6 +120,8 @@ if __name__ == "__main__":
     test_schema_modes_match_render_modes()
     test_contract_version_single_source()
     test_revit_config_modes_match_render_modes()
+    test_line_modes_are_render_modes()
+    test_live_mode_items_cover_render_modes()
     test_ribbon_has_a_button_per_mode()
     print("modes:", sorted(scene_spec.RENDER_MODES))
     print("contract_version:", scene_spec.CONTRACT_VERSION,

@@ -84,11 +84,17 @@ def set_world_flat(color=(0.98, 0.98, 0.98), strength=1.0):
     nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
 
 
-def set_camera_ray_world(visible=(0.96, 0.92, 0.82), ambient=0.06, strength=1.0):
-    """A world that shows a flat `visible` paper colour to the CAMERA but contributes
+def set_camera_ray_world(visible=(0.96, 0.92, 0.82), ambient=0.06, strength=1.0,
+                         gradient=None):
+    """A world that shows a `visible` paper colour to the CAMERA but contributes
     only a dim neutral `ambient` to LIGHTING (via Light Path 'Is Camera Ray'). Lets a
-    flat paper backdrop sit behind a scene lit almost entirely by the sun - a wide,
-    clean light->shade range for posterised looks (riso) without a black sky."""
+    paper backdrop sit behind a scene lit almost entirely by the sun - a wide, clean
+    light->shade range for posterised looks (riso) without a black sky.
+
+    `gradient` (horizon_rgb, zenith_rgb) makes the CAMERA see a soft vertical wash
+    (warm horizon at the bottom of frame -> cool zenith at the top, screen-space
+    Window.Y) instead of the flat `visible` colour - the watercolour sky. LIGHTING
+    still gets only the dim `ambient` either way."""
     w = bpy.context.scene.world
     if w is None:
         w = bpy.data.worlds.new("World")
@@ -107,9 +113,28 @@ def set_camera_ray_world(visible=(0.96, 0.92, 0.82), ambient=0.06, strength=1.0)
     mix = nt.nodes.new("ShaderNodeMixRGB")
     mix.location = (0, 0)
     mix.inputs["Color1"].default_value = (ambient, ambient, ambient, 1.0)   # lighting rays
-    mix.inputs["Color2"].default_value = (visible[0], visible[1], visible[2], 1.0)  # camera
     nt.links.new(lp.outputs["Is Camera Ray"], mix.inputs["Fac"])
     nt.links.new(mix.outputs["Color"], bg.inputs["Color"])
+    if gradient is None:
+        mix.inputs["Color2"].default_value = (visible[0], visible[1], visible[2], 1.0)
+        return
+    # Vertical screen-space wash for the camera: Window.Y (reliable in EEVEE where
+    # the world ray-direction coords aren't). Bottom of frame = warm horizon.
+    horizon, zenith = gradient
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    tc.location = (-600, -200)
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    sep.location = (-420, -200)
+    nt.links.new(tc.outputs["Window"], sep.inputs["Vector"])
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.location = (-200, -200)
+    ramp.color_ramp.interpolation = "EASE"
+    ramp.color_ramp.elements[0].position = 0.42
+    ramp.color_ramp.elements[0].color = tuple(horizon) + (1.0,)
+    ramp.color_ramp.elements[1].position = 0.95
+    ramp.color_ramp.elements[1].color = tuple(zenith) + (1.0,)
+    nt.links.new(sep.outputs["Y"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], mix.inputs["Color2"])
 
 
 def _ground():
