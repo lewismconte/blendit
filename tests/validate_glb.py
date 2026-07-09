@@ -15,7 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 
-from bir_contract.transport import MeshData
+from bir_contract.transport import MeshData, read_scene_spec
 from bir_transports.gltf.exporter import GltfExporter
 
 
@@ -45,7 +45,40 @@ def _parse_glb(data):
     return chunks
 
 
+def _check_non_ascii_names():
+    """A Revit material / category / view name with a non-ASCII char (the (R) sign
+    U+00AE, an accented 2D view name) must ROUND-TRIP, not crash the JSON writer.
+    IronPython's ascii json encoder dies decoding the high byte through the system
+    code page, so the writer emits UTF-8 (ensure_ascii=False) instead. Real Revit
+    names arrive as unicode-capable .NET strings, modelled here with \\x escapes so
+    this source stays ASCII."""
+    name = u"Acme\xae Steel"      # (R) = U+00AE
+    node = u"Cloison\xae_9"
+    view = u"Gr\xf6\xdfe"         # o-umlaut + sharp-s
+    meshes = [MeshData(node, [(0, 0, 0), (1, 0, 0), (0, 1, 0)],
+                       [(0, 1, 2)], material_id="mat_1")]
+    spec = {"contract_version": "0.1.0",
+            "materials": [{"id": "mat_1", "name": name, "base_color": [0.5, 0.5, 0.5]}],
+            "source": {"active_view": view},
+            "geometry": {"elements": [{"node": node, "material_id": "mat_1"}]},
+            "units": {"scale_to_meters": 0.3048}}
+    out_dir = tempfile.mkdtemp(prefix="bir_glb_uni_")
+    bundle_ref = GltfExporter().export(spec, meshes, out_dir)   # must NOT raise
+
+    # GLB JSON chunk is UTF-8 by spec.
+    chunks = _parse_glb(open(os.path.join(out_dir, "scene.glb"), "rb").read())
+    gltf = json.loads(chunks[0][1].decode("utf-8"))
+    assert gltf["materials"][0]["name"] == name, gltf["materials"][0]["name"]
+    assert gltf["nodes"][0]["name"] == node, gltf["nodes"][0]["name"]
+    # Sidecar must round-trip through the REAL reader (UTF-8), not a naive open().
+    sidecar = read_scene_spec(bundle_ref)
+    assert sidecar["materials"][0]["name"] == name
+    assert sidecar["source"]["active_view"] == view
+    print("OK  non-ASCII names round-trip (material / node / view), UTF-8 clean")
+
+
 def main():
+    _check_non_ascii_names()
     meshes = [_unit_box()]
     spec = {"contract_version": "0.1.0",
             "materials": [{"id": "mat_1", "name": "Brick",
@@ -82,7 +115,7 @@ def main():
     # box spans 0..1 on each axis; after z-up->y-up (-y) one axis goes -1..0.
     assert pos["count"] == 8, "expected 8 verts, got %d" % pos["count"]
 
-    sidecar = json.loads(open(bundle_ref).read())
+    sidecar = read_scene_spec(bundle_ref)
     assert sidecar["geometry"]["transport"] == "gltf"
     assert sidecar["geometry"]["uri"] == "scene.glb"
 

@@ -5,7 +5,6 @@ the cache), so the extraction path is identical. IronPython 2.7 safe. The caller
 passes the active doc (it holds __revit__) and a report(msg) callback for output.
 """
 import datetime
-import json
 import os
 
 import bir_bootstrap
@@ -292,22 +291,17 @@ def save_fingerprint(doc, cdir, view=None):
         return
     data["loaded_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     try:
-        f = open(os.path.join(cdir, _FINGERPRINT_NAME), "w")
-        try:
-            json.dump(data, f, indent=2)
-        finally:
-            f.close()
+        # UTF-8 safe: the view name may carry a non-ASCII char (see transport).
+        from bir_contract.transport import write_json
+        write_json(os.path.join(cdir, _FINGERPRINT_NAME), data)
     except Exception:
         pass
 
 
 def _load_fingerprint(cdir):
     try:
-        f = open(os.path.join(cdir, _FINGERPRINT_NAME))
-        try:
-            data = json.load(f)
-        finally:
-            f.close()
+        from bir_contract.transport import read_json
+        data = read_json(os.path.join(cdir, _FINGERPRINT_NAME))
         return data if isinstance(data, dict) else None
     except Exception:
         return None

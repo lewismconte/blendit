@@ -98,6 +98,32 @@ def test_live_mode_items_cover_render_modes():
         % (sorted(ids), sorted(scene_spec.RENDER_MODES)))
 
 
+def test_revit_side_is_pure_ascii():
+    # The Revit side runs under IronPython 2.7, which rejects a source file with a
+    # non-ASCII byte and no encoding declaration (PEP 263) - a hard SyntaxError at
+    # import, invisible to a CPython py_compile (Py3 defaults to UTF-8 source). Guard
+    # every Revit-side .py so a stray '(R)'/accent in a comment can't break the load.
+    roots = ("lib", "bir_contract", "Blendit.tab")
+    offenders = []
+    for r in roots:
+        base = os.path.join(_ROOT, r)
+        for dirpath, _dirs, files in os.walk(base):
+            if "__pycache__" in dirpath:
+                continue
+            for fn in files:
+                if not fn.endswith(".py"):
+                    continue
+                path = os.path.join(dirpath, fn)
+                with open(path, "rb") as f:
+                    raw = f.read()
+                bad = [i for i, b in enumerate(bytearray(raw)) if b > 127]
+                if bad:
+                    offenders.append("%s (first at byte %d)"
+                                     % (os.path.relpath(path, _ROOT), bad[0]))
+    assert not offenders, ("non-ASCII in Revit-side (IronPython) files:\n  "
+                           + "\n  ".join(offenders))
+
+
 def test_ribbon_has_a_button_per_mode():
     # Every render mode gets a pushbutton in the Mode pulldown (each script calls
     # bir_ui.set_mode("<key>")), so the ribbon can't silently miss a mode.
@@ -122,6 +148,7 @@ if __name__ == "__main__":
     test_revit_config_modes_match_render_modes()
     test_line_modes_are_render_modes()
     test_live_mode_items_cover_render_modes()
+    test_revit_side_is_pure_ascii()
     test_ribbon_has_a_button_per_mode()
     print("modes:", sorted(scene_spec.RENDER_MODES))
     print("contract_version:", scene_spec.CONTRACT_VERSION,

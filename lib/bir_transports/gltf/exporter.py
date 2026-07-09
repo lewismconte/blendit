@@ -95,6 +95,8 @@ class GltfExporter(Exporter):
         spec_dict["geometry"]["transport"] = "gltf"
         spec_dict["geometry"]["uri"] = "scene.glb"
         self._copy_texture_maps(spec_dict, out_dir)
+        # write_scene_spec emits UTF-8 (ensure_ascii=False) so a Revit name with a
+        # non-ASCII char can't crash IronPython's json encoder - see transport.py.
         return write_scene_spec(out_dir, spec_dict)
 
     def _copy_texture_maps(self, spec_dict, out_dir):
@@ -149,7 +151,11 @@ class GltfExporter(Exporter):
 
     def _assemble_glb(self, gltf, blob):
         """Wrap the glTF JSON + binary blob in the GLB container."""
-        json_bytes = json.dumps(gltf, separators=(",", ":"))
+        # ensure_ascii=False: never ask json to ascii-escape. IronPython's ascii
+        # encoder decodes any high byte in a Revit name (material/category with a
+        # non-ASCII char) through the system code page and dies; emitting UTF-8
+        # skips that. glTF's JSON chunk is UTF-8 by spec, so this is also correct.
+        json_bytes = json.dumps(gltf, separators=(",", ":"), ensure_ascii=False)
         if hasattr(json_bytes, "encode"):
             json_bytes = json_bytes.encode("utf-8")
         # JSON chunk padded with spaces, BIN chunk with zeros; each multiple of 4.

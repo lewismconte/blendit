@@ -31,16 +31,42 @@ def bundle_spec_path(bundle_dir):
     return os.path.join(bundle_dir, SCENE_SPEC_FILENAME)
 
 
+def write_json(path, obj):
+    # (str, obj) -> None ; the ONE safe JSON writer for both sides.
+    # ensure_ascii=False + UTF-8 bytes: a Revit string with a non-ASCII char (a
+    # material name carrying the (R) sign, an accented view name / path) crashes
+    # IronPython's ascii json encoder - it decodes the high byte through the system
+    # code page and throws. Emitting UTF-8 sidesteps that entirely; read_json reads
+    # it back as UTF-8. Old all-ASCII files are byte-identical either way.
+    data = json.dumps(obj, indent=2, ensure_ascii=False)
+    if hasattr(data, "encode"):
+        data = data.encode("utf-8")
+    f = open(path, "wb")
+    try:
+        f.write(data)
+    finally:
+        f.close()
+
+
+def read_json(path):
+    # (str) -> obj ; reads what write_json wrote (UTF-8). The default text open()
+    # would misread non-ASCII on Windows (cp1252). Same on IronPython 2.7 / CPython.
+    f = open(path, "rb")
+    try:
+        raw = f.read()
+    finally:
+        f.close()
+    if hasattr(raw, "decode"):
+        raw = raw.decode("utf-8")
+    return json.loads(raw)
+
+
 def write_scene_spec(bundle_dir, spec_dict):
     # (str, dict) -> str   ; returns bundle_ref (path to scene_spec.json)
     if not os.path.isdir(bundle_dir):
         os.makedirs(bundle_dir)
     path = bundle_spec_path(bundle_dir)
-    f = open(path, "w")
-    try:
-        json.dump(spec_dict, f, indent=2)
-    finally:
-        f.close()
+    write_json(path, spec_dict)
     return path
 
 
@@ -50,11 +76,7 @@ def read_scene_spec(bundle_ref):
         path = bundle_ref
     else:
         path = bundle_spec_path(bundle_ref)
-    f = open(path)
-    try:
-        return json.load(f)
-    finally:
-        f.close()
+    return read_json(path)
 
 
 def bundle_dir_of(bundle_ref):

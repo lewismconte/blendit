@@ -4,7 +4,6 @@ Stored as JSON at %APPDATA%\\blendit\\config.json. Shared by the
 Settings / Mode / Engine ribbon buttons (writers) and the render button (reader).
 Every accessor is exception-safe so a missing/corrupt config never breaks a button.
 """
-import json
 import os
 
 _DEFAULTS = {
@@ -66,11 +65,8 @@ def defaults():
 def load():
     cfg = dict(_DEFAULTS)
     try:
-        f = open(_config_path())
-        try:
-            data = json.load(f)
-        finally:
-            f.close()
+        from bir_contract.transport import read_json
+        data = read_json(_config_path())     # UTF-8 (paths may carry accents)
         if isinstance(data, dict):
             cfg.update(data)
     except Exception:
@@ -83,11 +79,8 @@ def save(cfg):
     be written (locked / read-only) so callers can tell the user instead of
     silently confirming a change that never persisted."""
     try:
-        f = open(_config_path(), "w")
-        try:
-            json.dump(cfg, f, indent=2)
-        finally:
-            f.close()
+        from bir_contract.transport import write_json
+        write_json(_config_path(), cfg)      # UTF-8 (paths may carry accents)
         return True
     except Exception:
         return False
