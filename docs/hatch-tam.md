@@ -93,9 +93,15 @@ validated on spheres/cylinders/organics before integration):
   strokes keep constant SCREEN width and tone changes by add/remove — the
   paper's actual trick, beyond what EEVEE nodes can express. Cycles-only,
   CPU; the emission-only shading converges in very few samples. Tone is
-  analytic Lambert from the sun-direction *input* (no Shader-to-RGB in
-  Cycles), synced by `hatch_tam.sync_sun()` — so no cast shadows by design;
-  an AO/shadow bake multiplied into tone is the noted v2 hook.
+  analytic Lambert from a light-direction *input* (no Shader-to-RGB in
+  Cycles) — so no cast shadows by design; an AO/shadow bake multiplied into
+  tone is the noted v2 hook. **The default tone light is a camera-relative
+  artist's key** (`hatch_tam.aim_camera_key()`: 45° over the left shoulder,
+  38° altitude, re-derived per render) because tone is the entire image and
+  a site-accurate sun can backlight a shot into uniform flat hatch — the
+  sample residence's 21:00 spec sun did exactly that. Live View's "Follow
+  Scene Sun" toggle switches to `sync_sun()` (tracks the lamp; reads
+  `rotation_euler`, NOT `matrix_world`, which is stale in the pipeline path).
 - **The parameterization is the pragmatic half** (point 1 stayed parked):
   instead of a curvature field, `hatch_tam.ensure_tam_uv()` bakes a
   dominant-axis box projection per face ("TamUV", world metres) — the
@@ -113,6 +119,16 @@ node — the `getattribute(uv_name)` path silently reads zeros headless (Cycles
 never exports a UV layer no node requests); engine flags (shading_system, CPU
 device, denoise OFF — denoising smears strokes) are derived from the mode in
 `engine.py setup_engine` via `registry.OSL_MODES`, never written into the
-shared spec, so they self-heal on every mode switch. Tuning carried over from
-the experiment branch: **ambient 0.5** (0.35 over-inks real facades) and a
-**20° sun-altitude floor** clamped on the shader input only.
+shared spec, so they self-heal on every mode switch.
+
+Tuning that MATTERS (each was a visible failure before it was fixed):
+- **uv_scale 0.5 tiles/metre.** The custom-mip system works while one tile
+  spans ~32–256 SCREEN px; at whole-building framing (~35 px/m) that means
+  metres-wide tiles. 3.0 put tiles at ~12 px → sub-pixel strokes aliasing
+  into flat grey "dense noise".
+- **ambient 0.15.** Full shadow → darkness 0.85 → the dense cross-hatch
+  columns (~5). 0.5 (mis-ported from the procedural hatch's tuning, where
+  tone drives line width, not stroke count) capped darkness at 0.5, so no
+  surface could ever draw past the mid sparse-dash column.
+- **20° sun-altitude floor** on the shader input only (used when following
+  the scene sun; the artist's key sits at 38° by construction).

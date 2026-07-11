@@ -516,6 +516,26 @@ def _update_crosshatch(self, context):
                              threshold=self.crosshatch_ink)
 
 
+def _update_crosshatch_key(self, context):
+    if _SYNCING:
+        return
+    from blender.pipeline import hatch_tam
+    if self.crosshatch_follow_sun:
+        hatch_tam.sync_sun()
+    else:
+        hatch_tam.aim_camera_key()
+
+
+def _refresh_crosshatch_key(st):
+    """Re-derive the crosshatch tone key from the CURRENT camera before a
+    render (the shot may have been reframed since the mode was applied).
+    No-op in follow-scene-sun mode or outside crosshatch."""
+    if st is None or st.mode != "crosshatch" or st.crosshatch_follow_sun:
+        return
+    from blender.pipeline import hatch_tam
+    hatch_tam.aim_camera_key()
+
+
 def _update_depth_cue(self, context):
     if _SYNCING:
         return
@@ -581,10 +601,11 @@ def _apply_sun_direction(az, alt):
                 if hasattr(n, "sun_rotation"):
                     n.sun_rotation = math.radians(az)
     # Crosshatch computes tone from a sun-direction INPUT (Cycles has no
-    # Shader-to-RGB), so the lamp move must be pushed into the shader too.
-    # No-op unless the crosshatch material exists.
-    if s is not None:
-        bpy.context.view_layer.update()    # rotation -> matrix_world first
+    # Shader-to-RGB): when it FOLLOWS the scene sun, push the lamp move into
+    # the shader too. (Default is the camera-relative key, which ignores the
+    # lamp entirely - see hatch_tam.aim_camera_key.)
+    st = getattr(bpy.context.scene, "bir", None)
+    if s is not None and st is not None and st.crosshatch_follow_sun:
         from blender.pipeline import hatch_tam
         hatch_tam.sync_sun()
 
@@ -1132,20 +1153,28 @@ class BIR_Settings(bpy.types.PropertyGroup):
         description="Which Tonal Art Map stroke set to draw with (swaps "
                     "instantly - no rebuild)", update=_update_crosshatch)
     crosshatch_scale: bpy.props.FloatProperty(
-        name="Stroke Scale", default=3.0, min=0.5, max=10.0,
-        description="Hatch tiles per metre of surface (higher = finer strokes; "
-                    "stroke WIDTH on screen stays constant either way - that's "
-                    "the TAM trick)", update=_update_crosshatch)
+        name="Stroke Scale", default=0.5, min=0.1, max=3.0,
+        description="Hatch tiles per metre of surface (higher = finer/shorter "
+                    "strokes). Strokes stay constant-width on SCREEN while one "
+                    "tile spans ~32-256 px - past that the look degrades, so "
+                    "raise this only for closeups", update=_update_crosshatch)
     crosshatch_ambient: bpy.props.FloatProperty(
-        name="Ambient", default=0.5, min=0.0, max=1.0,
-        description="Base tone before the sun: lower = more of the model gets "
-                    "inked (0.35 turns whole facades near-solid; 0.5 reads "
-                    "best on real buildings)", update=_update_crosshatch)
+        name="Ambient", default=0.15, min=0.0, max=1.0,
+        description="Base tone before the key light: lower = deeper, denser "
+                    "cross-hatch in the shadows (0.15 = the classic full-range "
+                    "look; raise toward 0.5 for an airier drawing)",
+        update=_update_crosshatch)
     crosshatch_ink: bpy.props.BoolProperty(
         name="Ink Threshold", default=False,
         description="Snap strokes to pure black/white (the paper's ink "
                     "transfer clamp(8t-3.5)); off keeps soft pencil greys",
         update=_update_crosshatch)
+    crosshatch_follow_sun: bpy.props.BoolProperty(
+        name="Follow Scene Sun", default=False,
+        description="Drive hatch tone from the scene sun (site-accurate; can "
+                    "leave a backlit shot uniformly hatched). Off = a "
+                    "camera-relative artist's key over the left shoulder, "
+                    "re-derived for each render", update=_update_crosshatch_key)
     depth_cue: bpy.props.BoolProperty(
         name="Depth Cue", default=False,
         description="Tier line weight by distance: near edges thick + dark, far "
@@ -1670,6 +1699,7 @@ def _do_capture():
     global _STATUS
     out = _next_capture_path()
     sc = bpy.context.scene
+    _refresh_crosshatch_key(getattr(sc, "bir", None))
     sc.render.image_settings.file_format = "PNG"
     sc.render.filepath = out
     bpy.ops.render.render(write_still=True)
@@ -1766,6 +1796,7 @@ def _render_still_at(out, samples):
         # CPU minutes on the lit-mode final_samples default
         sc.cycles.samples = min(int(samples), 64)
         sc.cycles.use_denoising = False
+        _refresh_crosshatch_key(st)     # key follows the FRAMED shot
     else:
         sc.render.engine = "CYCLES"
         sc.cycles.samples = int(samples)
@@ -2129,10 +2160,14 @@ class BIR_PT_light(_Sub, bpy.types.Panel):
         st = _bir(context)
         layout = self.layout
         if st.mode == "crosshatch":
-            # Tone is analytic (in-shader Lambert from the sun DIRECTION):
-            # exposure / sky / sun strength / softness are all inert. The Sun
-            # subpanel below is the control that matters.
-            layout.label(text="Tone follows the sun direction.", icon="LIGHT_SUN")
+            # Tone is analytic (in-shader Lambert from a light DIRECTION):
+            # exposure / sky / sun strength / softness are all inert.
+            layout.prop(st, "crosshatch_follow_sun", toggle=True,
+                        icon="LIGHT_SUN")
+            if st.crosshatch_follow_sun:
+                layout.label(text="Tone follows the Sun panel below.")
+            else:
+                layout.label(text="Tone: artist's key over the left shoulder.")
             return
         if st.mode in _LIT_MODES or st.mode == "linework":
             layout.prop(st, "exposure", slider=True)

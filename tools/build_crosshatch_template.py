@@ -45,9 +45,11 @@ EXPECTED_SOCKETS = [
 DEFAULTS = {
     "tone_mode": 0,
     "light_is_sun": 1,
-    "ambient": 0.5,      # 0.35 over-inks real facades (hatch-tam.md learning)
+    "ambient": 0.15,     # full shadow -> darkness 0.85 -> the dense TAM
+                         # columns; 0.5 capped the range at mid "dashes"
     "kd": 1.1,
-    "uv_scale": 3.0,     # TamUV is in world metres -> strokes per metre
+    "uv_scale": 0.5,     # TamUV is in world metres; tiles must span ~32-256
+                         # SCREEN px for the mip system, so metres-wide tiles
     "v_aspect": 1.0,
     "use_uv_socket": 1,  # UVIn via UV Map node; getattribute reads zeros headless
     "swap_uv": 0,
