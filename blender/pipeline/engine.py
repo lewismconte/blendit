@@ -17,10 +17,15 @@ def _eevee_engine_id():
 
 
 def setup_engine(spec):
+    from .presets.registry import OSL_MODES
     rspec = spec.get("render", {})
     engine = str(rspec.get("engine", "CYCLES")).upper()
     samples = int(rspec.get("samples", 128))
     denoise = bool(rspec.get("denoise", True))
+    # OSL modes (crosshatch): derived from the MODE, not written into the spec,
+    # so the flags self-heal on every mode switch instead of leaking. OSL forces
+    # CPU, and denoising would smear the strokes (they ARE the signal).
+    osl = str(rspec.get("mode", "")) in OSL_MODES
     scene = bpy.context.scene
 
     res = rspec.get("resolution", [1920, 1080])
@@ -37,5 +42,13 @@ def setup_engine(spec):
             scene.eevee.use_raytracing = True
     else:
         scene.render.engine = "CYCLES"
+        scene.cycles.shading_system = osl
+        if osl:
+            scene.cycles.device = "CPU"
+            denoise = False
+            scene.cycles.use_preview_denoising = False
+            scene.cycles.preview_samples = 8   # emission-only: converges fast
+        else:
+            scene.cycles.use_preview_denoising = True
         scene.cycles.samples = samples
         scene.cycles.use_denoising = denoise

@@ -1,9 +1,13 @@
 # Hatch — Tonal Art Maps (design note)
 
-> **Status: Phases 1–2 BUILT; Phase 3 parked research.** The Hatch render mode now
-> uses surface-attached, perspective-correct hatch lines with a nested cross-hatch
-> (Phases 1–2). This note records the source method and the path to the
-> research-grade Phase 3 for later style work.
+> **Status: Phases 1–2 BUILT (the `hatch` mode); Phase 3 SHIPPED as the separate
+> `crosshatch` mode.** The Hatch render mode uses surface-attached,
+> perspective-correct procedural hatch lines with a nested cross-hatch
+> (Phases 1–2). The authored-TAM renderer this note designed as "Phase 3" was
+> built out-of-repo (the `realtime-hatching` project), validated there, and
+> integrated as **Crosshatch** — see the section at the end. The two modes
+> coexist: `hatch` draws the shadows (Shader-to-RGB tone incl. cast shadows),
+> `crosshatch` draws hand-authored strokes from analytic sun tone.
 
 ## Source
 
@@ -72,3 +76,43 @@ hand-drawn styles become a priority. The procedural Phases 1–2 cover architect
 hatching well in the meantime, and a middle step — replacing the procedural stripe
 with a **procedural multi-layer "mini-TAM"** (several nested density layers added by
 tone) — could improve tonal smoothness before committing to textured TAMs.
+
+## Crosshatch — the authored-TAM realization (SHIPPED)
+
+Phase 3's TAM half landed as the sixteenth mode, `crosshatch`, from the
+out-of-repo `realtime-hatching` project (a faithful Praun implementation,
+validated on spheres/cylinders/organics before integration):
+
+- **The TAMs are real** (point 2 above, done properly): `tools/tam_generator.py`
+  implements the paper's Section-4 automatic construction — 4 mip levels ×
+  6 tone columns, toroidal, stroke-nested both ways, constant *pixel* width
+  per level — in four styles (**ink, brush, sketchy, charcoal**), shipped as
+  96 small PNGs under `blender/resources/hatch_tam/tam_<style>/`.
+- **Rendering is a Cycles OSL shader** (`tam_hatch.osl`), not hardware mips:
+  `filterwidth()` picks the mip whose texel matches the screen pixel, so
+  strokes keep constant SCREEN width and tone changes by add/remove — the
+  paper's actual trick, beyond what EEVEE nodes can express. Cycles-only,
+  CPU; the emission-only shading converges in very few samples. Tone is
+  analytic Lambert from the sun-direction *input* (no Shader-to-RGB in
+  Cycles), synced by `hatch_tam.sync_sun()` — so no cast shadows by design;
+  an AO/shadow bake multiplied into tone is the noted v2 hook.
+- **The parameterization is the pragmatic half** (point 1 stayed parked):
+  instead of a curvature field, `hatch_tam.ensure_tam_uv()` bakes a
+  dominant-axis box projection per face ("TamUV", world metres) — the
+  triplanar idea as REAL UVs with hard seams at corners. Right for coarse
+  planar Revit geometry; the lapped/curvature variant for organics exists in
+  the source project (`tam_hatch_lapped.osl` + `lapped_field.py`) and on the
+  `hatch-flow-experiment` branch, still out of scope.
+
+Integration facts future-you will want (all encoded in `blender/pipeline/
+hatch_tam.py` docstrings): Script-node sockets are created by a GUI-only
+operator, so the compiled material ships in `tam_hatch_template.blend`
+(rebuild via `tools/build_crosshatch_template.py`, GUI required, whenever the
+shader's parameter list changes); UVs MUST enter via the template's UV Map
+node — the `getattribute(uv_name)` path silently reads zeros headless (Cycles
+never exports a UV layer no node requests); engine flags (shading_system, CPU
+device, denoise OFF — denoising smears strokes) are derived from the mode in
+`engine.py setup_engine` via `registry.OSL_MODES`, never written into the
+shared spec, so they self-heal on every mode switch. Tuning carried over from
+the experiment branch: **ambient 0.5** (0.35 over-inks real facades) and a
+**20° sun-altitude floor** clamped on the shader input only.

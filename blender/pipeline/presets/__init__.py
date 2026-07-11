@@ -1,8 +1,9 @@
 """Render-mode preset registry (the data-driven §9 modes).
 
-Importing this package registers all fifteen modes via their modules: four
-lit/clay (realistic, white, shadow, specular) plus eleven stylised (linework, pen,
-sketch, cel, hatch, yellowtrace, kraft, blueprint, diagram, watercolor, risograph).
+Importing this package registers all sixteen modes via their modules: four
+lit/clay (realistic, white, shadow, specular) plus twelve stylised (linework, pen,
+sketch, cel, hatch, crosshatch, yellowtrace, kraft, blueprint, diagram, watercolor,
+risograph).
 Adding a mode later = a new module that calls `register_preset(...)`, imported here.
 """
 from .registry import (  # noqa: F401
@@ -19,6 +20,7 @@ from . import pen          # noqa: F401  (NPR: Rhino-style technical pen)
 from . import sketch       # noqa: F401  (NPR: hand-drawn sketch)
 from . import cel          # noqa: F401  (NPR: anime cel shading)
 from . import hatch        # noqa: F401  (NPR: tonal shadow hatching)
+from . import crosshatch   # noqa: F401  (NPR: Praun TAM stroke hatching, Cycles/OSL)
 from . import yellowtrace  # noqa: F401  (NPR: sketch on yellow trace paper)
 from . import kraft        # noqa: F401  (NPR: white accents on brown paper)
 from . import blueprint    # noqa: F401  (NPR: white lines on cyanotype blue)

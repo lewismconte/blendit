@@ -8,7 +8,7 @@ layout:
   - RenderLoadedModel  # headless render a loaded view as-is
   - Views              # the loaded-views list: open / render / reload / remove, with staleness
   - "---"
-  - Mode               # render mode (15 looks)
+  - Mode               # render mode (16 looks)
   - Quality            # effort preset (engine + samples + denoise)
   - Resolution         # output size
   - Engine             # Cycles / EEVEE toggle

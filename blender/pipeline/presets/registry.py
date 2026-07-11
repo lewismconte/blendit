@@ -12,8 +12,15 @@ _PRESETS = {}
 # renderer and the interactive session import this instead of keeping their own
 # copies (which silently drifted). Kept here (bpy-free) so it can be listed without
 # Blender; tests/ assert it stays a subset of bir_contract's RENDER_MODES.
-LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch", "yellowtrace",
-              "kraft", "blueprint", "diagram", "watercolor", "risograph")
+LINE_MODES = ("linework", "pen", "sketch", "cel", "hatch", "crosshatch",
+              "yellowtrace", "kraft", "blueprint", "diagram", "watercolor",
+              "risograph")
+
+# Modes whose materials use OSL Script nodes: Cycles-only, CPU device, and
+# denoising must stay OFF (it smears the strokes). engine.py and the live
+# session derive shading_system / device / denoise from this tuple instead of
+# mutating the shared spec (which would leak into other modes).
+OSL_MODES = ("crosshatch",)
 
 
 def register_preset(name, fn):

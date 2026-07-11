@@ -506,6 +506,16 @@ def _update_hatch(self, context):
                   self.hatch_angle, self.hatch_cross_angle)
 
 
+def _update_crosshatch(self, context):
+    if _SYNCING:
+        return
+    from blender.pipeline import hatch_tam
+    hatch_tam.set_crosshatch(style=self.crosshatch_style,
+                             uv_scale=self.crosshatch_scale,
+                             ambient=self.crosshatch_ambient,
+                             threshold=self.crosshatch_ink)
+
+
 def _update_depth_cue(self, context):
     if _SYNCING:
         return
@@ -570,6 +580,13 @@ def _apply_sun_direction(az, alt):
                     n.sun_elevation = math.radians(alt)
                 if hasattr(n, "sun_rotation"):
                     n.sun_rotation = math.radians(az)
+    # Crosshatch computes tone from a sun-direction INPUT (Cycles has no
+    # Shader-to-RGB), so the lamp move must be pushed into the shader too.
+    # No-op unless the crosshatch material exists.
+    if s is not None:
+        bpy.context.view_layer.update()    # rotation -> matrix_world first
+        from blender.pipeline import hatch_tam
+        hatch_tam.sync_sun()
 
 
 def _recompute_sun():
@@ -630,6 +647,17 @@ def _apply_mode(mode):
     setup_engine(_SPEC)
     _sync_settings_from_scene()
     _apply_user_sun(getattr(bpy.context.scene, "bir", None))  # keep the user's sun
+    if mode == "crosshatch":
+        # The preset resets the material to defaults; push the panel's values
+        # back so the sliders never lie (and the chosen style survives a
+        # round-trip through another mode).
+        st = getattr(bpy.context.scene, "bir", None)
+        if st is not None:
+            from blender.pipeline import hatch_tam
+            hatch_tam.set_crosshatch(style=st.crosshatch_style,
+                                     uv_scale=st.crosshatch_scale,
+                                     ambient=st.crosshatch_ambient,
+                                     threshold=st.crosshatch_ink)
     if mode in _LINE_MODES:
         # The preset built a fresh procedural Line Art; let it trace once, then
         # freeze it so export / render / capture reuse it instead of recomputing.
@@ -725,6 +753,8 @@ _MODE_ITEMS = [
     ("sketch", "Sketch", "Hand-drawn wobbly lines on paper"),
     ("cel", "Cel / Anime", "Toon shading + outline"),
     ("hatch", "Hatch", "Tonal shadow hatching (perspective-correct lines)"),
+    ("crosshatch", "Crosshatch",
+     "Hand-drawn stroke hatching (Praun TAMs), 4 styles - Cycles/OSL, CPU"),
     ("yellowtrace", "Yellowtrace", "Loose sketch on yellow trace paper"),
     ("kraft", "Brown Paper", "Black ink + white accents on kraft paper"),
     ("blueprint", "Blueprint", "White line work on cyanotype blue"),
@@ -736,6 +766,7 @@ _MODE_ITEMS = [
 _LIT_MODES = ("realistic", "white", "shadow", "specular")
 # Single source of truth (shared with the headless renderer) - no local copy to drift.
 from blender.pipeline.presets.registry import LINE_MODES as _LINE_MODES  # noqa: E402
+from blender.pipeline.presets.registry import OSL_MODES as _OSL_MODES  # noqa: E402
 # Modes where real materials (and therefore textures) are visible. White/Shadow are
 # clay overrides; the NPR modes are line / flat. Kept in sync with material_library.
 _TEXTURED_MODES = ("realistic", "specular")
@@ -1088,6 +1119,33 @@ class BIR_Settings(bpy.types.PropertyGroup):
         name="Cross Angle", default=90.0, min=0.0, max=360.0,
         description="Direction of the cross-hatch set, 0-360 deg (90 = perpendicular "
                     "to the hatch)", update=_update_hatch)
+    crosshatch_style: bpy.props.EnumProperty(
+        name="Stroke Style",
+        items=[("ink", "Ink", "The paper's classic line-art style: crisp "
+                "nested cross-hatching"),
+               ("brush", "Brush", "Thick tapered wavy strokes, paint-brush feel"),
+               ("sketchy", "Sketchy", "Thin translucent jittery strokes that "
+                "build tone by layering"),
+               ("charcoal", "Charcoal", "Broad grainy strokes, charcoal / "
+                "crayon on paper")],
+        default="ink",
+        description="Which Tonal Art Map stroke set to draw with (swaps "
+                    "instantly - no rebuild)", update=_update_crosshatch)
+    crosshatch_scale: bpy.props.FloatProperty(
+        name="Stroke Scale", default=3.0, min=0.5, max=10.0,
+        description="Hatch tiles per metre of surface (higher = finer strokes; "
+                    "stroke WIDTH on screen stays constant either way - that's "
+                    "the TAM trick)", update=_update_crosshatch)
+    crosshatch_ambient: bpy.props.FloatProperty(
+        name="Ambient", default=0.5, min=0.0, max=1.0,
+        description="Base tone before the sun: lower = more of the model gets "
+                    "inked (0.35 turns whole facades near-solid; 0.5 reads "
+                    "best on real buildings)", update=_update_crosshatch)
+    crosshatch_ink: bpy.props.BoolProperty(
+        name="Ink Threshold", default=False,
+        description="Snap strokes to pure black/white (the paper's ink "
+                    "transfer clamp(8t-3.5)); off keeps soft pencil greys",
+        update=_update_crosshatch)
     depth_cue: bpy.props.BoolProperty(
         name="Depth Cue", default=False,
         description="Tier line weight by distance: near edges thick + dark, far "
@@ -1564,7 +1622,7 @@ def _stitch_grid(paths, cols, out_path, pad=6):
 
 def _contact_steps():
     """Render the CURRENT shot small in every mode, one mode per tick, then
-    stitch the fifteen cells into a single grid PNG - 'which look should this
+    stitch the sixteen cells into a single grid PNG - 'which look should this
     be?' answered in one image."""
     global _STATUS
     import tempfile
@@ -1683,12 +1741,15 @@ class BIR_OT_regenerate_lines(bpy.types.Operator):
 
 def _render_still_at(out, samples):
     """Render the current scene to `out` at `samples`: Cycles for lit modes,
-    EEVEE for NPR (that's where Line Art / toon render), engine + sample
-    counts restored afterwards. Shared by Render Final, the Saved Views
-    batch, and the contact sheet."""
+    EEVEE for NPR (that's where Line Art / toon render), Cycles+OSL for the
+    OSL modes (Script nodes are dead in EEVEE, and denoising would smear the
+    strokes), engine + sample counts restored afterwards. Shared by Render
+    Final, the Saved Views batch, and the contact sheet."""
     sc = bpy.context.scene
     st = getattr(sc, "bir", None)
-    npr_mode = bool(st is not None and st.mode in _LINE_MODES)
+    mode = st.mode if st is not None else ""
+    osl_mode = mode in _OSL_MODES
+    npr_mode = bool(not osl_mode and mode in _LINE_MODES)
     prev_engine = sc.render.engine
     try:                                    # final samples are final-only: remember
         prev_eevee_samples = sc.eevee.taa_render_samples
@@ -1699,6 +1760,12 @@ def _render_still_at(out, samples):
     if npr_mode:
         sc.render.engine = _eevee_engine_id()
         sc.eevee.taa_render_samples = int(samples)
+    elif osl_mode:
+        sc.render.engine = "CYCLES"
+        # emission-only shading: converges in a few samples, so don't burn
+        # CPU minutes on the lit-mode final_samples default
+        sc.cycles.samples = min(int(samples), 64)
+        sc.cycles.use_denoising = False
     else:
         sc.render.engine = "CYCLES"
         sc.cycles.samples = int(samples)
@@ -1885,7 +1952,7 @@ class BIR_OT_bookmark_render_all(bpy.types.Operator):
 class BIR_OT_contact_sheet(bpy.types.Operator):
     bl_idname = "bir.contact_sheet"
     bl_label = "Contact Sheet"
-    bl_description = ("Render THIS shot in all fifteen looks as one grid image - "
+    bl_description = ("Render THIS shot in all sixteen looks as one grid image - "
                       "pick a style (or send options) from a single PNG")
 
     def execute(self, context):
@@ -1979,7 +2046,7 @@ class BIR_PT_main(bpy.types.Panel):
         col.operator("bir.render_image", text="Capture", icon="RENDER_STILL")
         col.operator("bir.render_final", text="Render Final", icon="RENDER_STILL")
         col.scale_y = 1.0
-        col.operator("bir.contact_sheet", text="Contact Sheet (15 looks)",
+        col.operator("bir.contact_sheet", text="Contact Sheet (16 looks)",
                      icon="IMGDISPLAY")
         row = col.row(align=True)
         row.operator("bir.open_captures", text="Open Captures", icon="FILE_FOLDER")
@@ -1994,6 +2061,8 @@ class BIR_PT_main(bpy.types.Panel):
         box.prop(st, "mode", text="")
         if st.mode in _LIT_MODES:
             box.prop(st, "engine", text="")
+        elif st.mode in _OSL_MODES:
+            box.label(text="Engine: Cycles (OSL, CPU)")
         else:
             box.label(text="Engine: EEVEE")
         box.prop(st, "final_samples")          # Render Final quality (all modes)
@@ -2053,11 +2122,18 @@ class BIR_PT_light(_Sub, bpy.types.Panel):
     def poll(cls, context):
         st = _bir(context)
         return st is not None and (st.mode in _LIT_MODES
-                                   or st.mode in ("linework", "cel", "hatch"))
+                                   or st.mode in ("linework", "cel", "hatch",
+                                                  "crosshatch"))
 
     def draw(self, context):
         st = _bir(context)
         layout = self.layout
+        if st.mode == "crosshatch":
+            # Tone is analytic (in-shader Lambert from the sun DIRECTION):
+            # exposure / sky / sun strength / softness are all inert. The Sun
+            # subpanel below is the control that matters.
+            layout.label(text="Tone follows the sun direction.", icon="LIGHT_SUN")
+            return
         if st.mode in _LIT_MODES or st.mode == "linework":
             layout.prop(st, "exposure", slider=True)
             layout.prop(st, "sky_strength", slider=True)
@@ -2122,6 +2198,12 @@ class BIR_PT_lines(_Sub, bpy.types.Panel):
             hb.prop(st, "hatch_cross", toggle=True)
             if st.hatch_cross:
                 hb.prop(st, "hatch_cross_angle", slider=True)
+        if st.mode == "crosshatch":
+            cb = layout.column(align=True)
+            cb.prop(st, "crosshatch_style")
+            cb.prop(st, "crosshatch_scale", slider=True)
+            cb.prop(st, "crosshatch_ambient", slider=True)
+            cb.prop(st, "crosshatch_ink", toggle=True)
         big = layout.column(align=True)
         big.scale_y = 1.3
         big.operator("bir.regenerate_lines", icon="FILE_REFRESH")
