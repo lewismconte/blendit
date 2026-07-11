@@ -86,10 +86,12 @@ def main():
     ground = bpy.data.objects.get("BIR_Ground")
     if ground is not None:
         gmats = [m.name for m in ground.data.materials if m is not None]
-        assert gmats == [hatch_tam.PAPER_MATERIAL], \
-            "ground should be white paper, got %r" % gmats
+        assert gmats == [hatch_tam.GROUND_MATERIAL], \
+            "ground should be the shadow-only variant, got %r" % gmats
+        assert ground.data.uv_layers.get(hatch_tam.UV_LAYER), \
+            "ground missing %s (its cast shadow hatches)" % hatch_tam.UV_LAYER
     assert bpy.data.objects.get("BIR_LineArt") is not None, "Line Art missing"
-    print("material + TamUV on %d meshes OK (ground = paper)" % len(meshes))
+    print("material + TamUV on %d meshes OK (ground = shadow-only)" % len(meshes))
 
     # --- strokes actually drawn (not the flat-grey OSL fallback) -----------
     ink = _luma(out)
@@ -118,6 +120,17 @@ def main():
         "uv_scale change altered nothing (diff %.5f): TamUV isn't reaching " \
         "the device - is the UV Map node still linked into UVIn?" % duv
     print("TamUV live on device OK (scale diff %.4f)" % duv)
+
+    # --- cast shadows really trace (behavioral, like the UV check) ---------
+    hatch_tam.set_crosshatch(shadows=False)
+    sc.render.filepath = os.path.join(_OUT_DIR, "crosshatch_noshadow.png")
+    bpy.ops.render.render(write_still=True)
+    noshadow = _luma(sc.render.filepath)
+    hatch_tam.set_crosshatch(shadows=True)
+    dsh = float(np.abs(a - noshadow).mean())
+    assert dsh > 0.002, \
+        "cast-shadow toggle changed nothing (diff %.5f): OSL trace() dead?" % dsh
+    print("cast shadows traced OK (toggle diff %.4f)" % dsh)
 
     # --- style switch re-renders differently -------------------------------
     hatch_tam.set_crosshatch(style="charcoal")

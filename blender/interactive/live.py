@@ -513,7 +513,8 @@ def _update_crosshatch(self, context):
     hatch_tam.set_crosshatch(style=self.crosshatch_style,
                              uv_scale=self.crosshatch_scale,
                              ambient=self.crosshatch_ambient,
-                             threshold=self.crosshatch_ink)
+                             threshold=self.crosshatch_ink,
+                             shadows=self.crosshatch_shadows)
 
 
 def _update_crosshatch_key(self, context):
@@ -678,7 +679,8 @@ def _apply_mode(mode):
             hatch_tam.set_crosshatch(style=st.crosshatch_style,
                                      uv_scale=st.crosshatch_scale,
                                      ambient=st.crosshatch_ambient,
-                                     threshold=st.crosshatch_ink)
+                                     threshold=st.crosshatch_ink,
+                                     shadows=st.crosshatch_shadows)
     if mode in _LINE_MODES:
         # The preset built a fresh procedural Line Art; let it trace once, then
         # freeze it so export / render / capture reuse it instead of recomputing.
@@ -1169,11 +1171,18 @@ class BIR_Settings(bpy.types.PropertyGroup):
         description="Snap strokes to pure black/white (the paper's ink "
                     "transfer clamp(8t-3.5)); off keeps soft pencil greys",
         update=_update_crosshatch)
+    crosshatch_shadows: bpy.props.BoolProperty(
+        name="Cast Shadows", default=True,
+        description="Trace real cast shadows toward the tone light and draw "
+                    "them in hatch (roof overhangs, trees on facades, the "
+                    "building anchoring on the ground). Off = orientation "
+                    "tone only, as in the original paper",
+        update=_update_crosshatch)
     crosshatch_follow_sun: bpy.props.BoolProperty(
         name="Follow Scene Sun", default=False,
         description="Drive hatch tone from the scene sun (site-accurate; can "
                     "leave a backlit shot uniformly hatched). Off = a "
-                    "camera-relative artist's key over the left shoulder, "
+                    "camera-relative artist's key over the right shoulder, "
                     "re-derived for each render", update=_update_crosshatch_key)
     depth_cue: bpy.props.BoolProperty(
         name="Depth Cue", default=False,
@@ -2167,7 +2176,7 @@ class BIR_PT_light(_Sub, bpy.types.Panel):
             if st.crosshatch_follow_sun:
                 layout.label(text="Tone follows the Sun panel below.")
             else:
-                layout.label(text="Tone: artist's key over the left shoulder.")
+                layout.label(text="Tone: artist's key over the right shoulder.")
             return
         if st.mode in _LIT_MODES or st.mode == "linework":
             layout.prop(st, "exposure", slider=True)
@@ -2238,7 +2247,9 @@ class BIR_PT_lines(_Sub, bpy.types.Panel):
             cb.prop(st, "crosshatch_style")
             cb.prop(st, "crosshatch_scale", slider=True)
             cb.prop(st, "crosshatch_ambient", slider=True)
-            cb.prop(st, "crosshatch_ink", toggle=True)
+            r = cb.row(align=True)
+            r.prop(st, "crosshatch_ink", toggle=True)
+            r.prop(st, "crosshatch_shadows", toggle=True)
         big = layout.column(align=True)
         big.scale_y = 1.3
         big.operator("bir.regenerate_lines", icon="FILE_REFRESH")

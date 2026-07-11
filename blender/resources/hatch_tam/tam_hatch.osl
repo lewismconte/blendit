@@ -13,6 +13,10 @@
 // - Tone is computed from lighting (ambient + Lambertian), as in the paper
 //   where lighting is evaluated outside the texturing stage.  Per-pixel
 //   evaluation is the exact limit of the paper's 6-way per-vertex blend.
+//   Beyond the paper: cast_shadows fires an OSL trace() occlusion ray toward
+//   the tone light, so cast shadows are drawn in the same hatch language
+//   (CPU Cycles only - which this mode already is). shadow_only turns a
+//   surface into white paper that shows ONLY the cast shadow (the ground).
 // - Custom mip-map behaviour: level l of the TAM has resolution 32*2^l and
 //   strokes of constant *pixel* width.  We select the level whose texel
 //   size matches the screen pixel footprint (via filterwidth) and blend the
@@ -49,6 +53,9 @@ shader tam_hatch(
     point light_pos = point(4.0, -3.0, 6.0),
     int light_is_sun = 0,
     vector sun_dir = vector(-0.4, 0.4, -1.0),  // travel direction of light
+    int cast_shadows = 1,       // trace() a shadow ray toward the tone light
+    float shadow_bias = 0.05,   // metres of normal offset (self-hit guard)
+    int shadow_only = 0,        // ground mode: white paper unless occluded
     float ambient = 0.05,
     float kd = 1.1,
     float uv_scale = 6.0,
@@ -71,8 +78,41 @@ shader tam_hatch(
             L = -normalize(sun_dir);
         else
             L = normalize(light_pos - P);
-        float ndl = max(dot(normalize(N), L), 0.0);
-        tone = clamp(ambient + kd * ndl, 0.0, 1.0);
+        vector Nn = normalize(N);
+        float ndl = max(dot(Nn, L), 0.0);
+        // Cast shadow: one occlusion ray toward the tone light (CPU OSL
+        // trace() against the scene BVH). An occluded point falls to the
+        // ambient floor - i.e. the cast shadow is DRAWN in dense hatch,
+        // exactly like the orientation shadow.
+        //
+        // Coplanar-graze rejection: on coarse Revit tessellation (huge
+        // triangles) a key that rakes a big plane at a shallow angle - e.g.
+        // 38-degree light up a ~45-degree roof - re-intersects the SAME
+        // plane metres from the origin, where no origin bias can help. A
+        // hit that lies (nearly) in this surface's own tangent plane is
+        // tessellation noise, not an occluder; a real occluder (eave, tree,
+        // tower) stands well proud of the plane.
+        int occluded = 0;
+        if (cast_shadows && ndl > 0.0) {
+            if (trace(P + Nn * shadow_bias, L)) {
+                occluded = 1;
+                float hd = -1.0;
+                if (getmessage("trace", "hitdist", hd)) {
+                    point hp = P + Nn * shadow_bias + L * hd;
+                    if (fabs(dot(hp - P, Nn)) < 0.10)
+                        occluded = 0;
+                }
+            }
+        }
+        if (shadow_only) {
+            // Ground/paper mode: stay pure white; only the cast shadow is
+            // drawn (the classic anchoring shadow of a pen drawing).
+            tone = occluded ? clamp(ambient, 0.0, 1.0) : 1.0;
+        } else {
+            if (occluded)
+                ndl = 0.0;
+            tone = clamp(ambient + kd * ndl, 0.0, 1.0);
+        }
     }
 
     // ---------------- UV + custom mip level ----------------

@@ -94,10 +94,18 @@ validated on spheres/cylinders/organics before integration):
   paper's actual trick, beyond what EEVEE nodes can express. Cycles-only,
   CPU; the emission-only shading converges in very few samples. Tone is
   analytic Lambert from a light-direction *input* (no Shader-to-RGB in
-  Cycles) — so no cast shadows by design; an AO/shadow bake multiplied into
-  tone is the noted v2 hook. **The default tone light is a camera-relative
-  artist's key** (`hatch_tam.aim_camera_key()`: 45° over the left shoulder,
-  38° altitude, re-derived per render) because tone is the entire image and
+  Cycles), **plus real cast shadows**: an OSL `trace()` occlusion ray toward
+  the same direction drops occluded points to the ambient floor, so eave
+  bands, tree shadows and the building's anchoring ground shadow are drawn
+  in the same hatch language (beyond the paper, whose tone was
+  orientation-only). Two traps encoded in the shader: origin bias must be
+  ~5 cm (coarse Revit tessellation), and hits lying in the surface's own
+  tangent plane are rejected (a raking key re-intersects the same huge
+  triangle metres away — no origin bias fixes that). The synthetic ground
+  uses a `shadow_only` material copy: white paper that draws only the cast
+  shadow. **The default tone light is a camera-relative
+  artist's key** (`hatch_tam.aim_camera_key()`: 45° over the right shoulder,
+  45° altitude, re-derived per render) because tone is the entire image and
   a site-accurate sun can backlight a shot into uniform flat hatch — the
   sample residence's 21:00 spec sun did exactly that. Live View's "Follow
   Scene Sun" toggle switches to `sync_sun()` (tracks the lamp; reads

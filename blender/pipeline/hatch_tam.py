@@ -23,12 +23,14 @@ Cycles-only, CPU (OSL). Three integration facts this module encodes:
   architectural corners, which is where hand hatching restarts anyway.
 
 The shader computes its own Lambert tone from the sun_dir INPUT (Cycles has
-no Shader-to-RGB). Tone is orientation-only - no cast shadows, no AO
-(faithful to the paper; unlike `hatch`, where the shadows are the drawing) -
-so the light DIRECTION is the whole image. Default = aim_camera_key(), a
-camera-relative artist's key (a site sun can backlight a shot into flat
-uniform hatch - a real 21:00 spec did exactly that); Live View's "Follow
-scene sun" toggle switches to sync_sun(), which tracks the lamp.
+no Shader-to-RGB), and CAST SHADOWS are traced in-shader (an OSL trace()
+occlusion ray toward the same direction - beyond the paper, whose tone was
+orientation-only). The light DIRECTION is therefore the whole image. Default
+= aim_camera_key(), a camera-relative artist's key (a site sun can backlight
+a shot into flat uniform hatch - a real 21:00 spec did exactly that); Live
+View's "Follow Scene Sun" toggle switches to sync_sun(), which tracks the
+lamp. The synthetic ground uses a shadow_only material copy: white paper
+that draws just the building's anchoring cast shadow.
 """
 import math
 import os
@@ -38,6 +40,7 @@ import numpy as np
 from mathutils import Vector
 
 MATERIAL = "BIR_Crosshatch"
+GROUND_MATERIAL = "BIR_CrosshatchGround"   # shadow_only=1 copy for the ground
 UV_LAYER = "TamUV"
 UV_VERSION = 1          # bump to force a re-bake of existing TamUV layers
 STYLES = ("ink", "brush", "sketchy", "charcoal")
@@ -65,6 +68,18 @@ def _script_node(mat):
         if n.type == "SCRIPT":
             return n
     return None
+
+
+def _script_nodes():
+    """Script nodes of every crosshatch material that exists (model + ground),
+    so parameter pokes and sun syncs fan out to both."""
+    nodes = []
+    for name in (MATERIAL, GROUND_MATERIAL):
+        mat = bpy.data.materials.get(name)
+        node = _script_node(mat) if mat else None
+        if node is not None:
+            nodes.append(node)
+    return nodes
 
 
 def _get_material():
@@ -126,20 +141,23 @@ def _bake_box_uv(obj, me):
     layer.data.foreach_set("uv", np.stack([u, v], 1).astype(np.float32).ravel())
 
 
-def aim_camera_key(azimuth_offset_deg=45.0, altitude_deg=38.0):
-    """Point the shader's tone key over the camera's shoulder (classic artist
-    light: upper-left-behind). The DEFAULT tone source for this mode.
+def aim_camera_key(azimuth_offset_deg=45.0, altitude_deg=45.0):
+    # altitude 45: high enough that typical roof pitches don't self-shadow
+    # from their own ridges under the traced cast shadows (38 left steep
+    # roofs half-hatched), low enough to keep raking eave/wall shadow bands.
+    """Point the shader's tone key over the camera's RIGHT shoulder (an
+    artist's raking light, upper-behind). The DEFAULT tone source here.
 
-    Tone is the entire image here (no cast shadows), so a site-accurate sun
-    can render a shot backlit-flat - e.g. a 21:00 spec sun behind the model
-    hatched every visible face identically. The lamp itself contributes
-    NOTHING to the final pixels (emission material + flat white world), so
-    only the shader input is written; the scene sun stays site-accurate for
-    every other mode. Live View's "Follow scene sun" toggle switches to
-    sync_sun() instead. Falls back to sync_sun() when no camera exists."""
-    mat = bpy.data.materials.get(MATERIAL)
-    script = _script_node(mat) if mat else None
-    if script is None:
+    Tone (and the traced cast shadows) follow this direction, so a
+    site-accurate sun can render a shot backlit-flat - e.g. a 21:00 spec sun
+    behind the model hatched every visible face identically. The lamp itself
+    contributes NOTHING to the final pixels (emission material + flat white
+    world), so only the shader inputs are written; the scene sun stays
+    site-accurate for every other mode. Live View's "Follow Scene Sun"
+    toggle switches to sync_sun() instead. Falls back to sync_sun() when no
+    camera exists."""
+    nodes = _script_nodes()
+    if not nodes:
         return
     cam = bpy.context.scene.camera
     if cam is None:
@@ -155,14 +173,15 @@ def aim_camera_key(azimuth_offset_deg=45.0, altitude_deg=38.0):
         sync_sun()
         return
     back = -fh.normalized()
-    ang = math.radians(azimuth_offset_deg)      # + = over the LEFT shoulder
-    left = Vector((back.x * math.cos(ang) - back.y * math.sin(ang),
+    ang = math.radians(azimuth_offset_deg)      # + = over the RIGHT shoulder
+    side = Vector((back.x * math.cos(ang) - back.y * math.sin(ang),
                    back.x * math.sin(ang) + back.y * math.cos(ang), 0.0))
     alt = math.radians(altitude_deg)
-    to_sun = Vector((left.x * math.cos(alt), left.y * math.cos(alt),
+    to_sun = Vector((side.x * math.cos(alt), side.y * math.cos(alt),
                      math.sin(alt)))
-    script.inputs["light_is_sun"].default_value = 1
-    script.inputs["sun_dir"].default_value = -to_sun
+    for script in nodes:
+        script.inputs["light_is_sun"].default_value = 1
+        script.inputs["sun_dir"].default_value = -to_sun
 
 
 def sync_sun(min_altitude_deg=MIN_SUN_ALTITUDE_DEG):
@@ -170,9 +189,8 @@ def sync_sun(min_altitude_deg=MIN_SUN_ALTITUDE_DEG):
 
     No-op unless both the crosshatch material and a sun lamp exist, so it is
     safe to call from the generic sun-move path for every mode."""
-    mat = bpy.data.materials.get(MATERIAL)
-    script = _script_node(mat) if mat else None
-    if script is None:
+    nodes = _script_nodes()
+    if not nodes:
         return
     from .presets import _helpers   # lazy: avoids import cycle via presets
     sun = _helpers.sun_object()
@@ -194,57 +212,67 @@ def sync_sun(min_altitude_deg=MIN_SUN_ALTITUDE_DEG):
         to_sun = Vector((math.cos(az) * math.cos(floor),
                          math.sin(az) * math.cos(floor),
                          math.sin(floor)))
-    script.inputs["light_is_sun"].default_value = 1
-    script.inputs["sun_dir"].default_value = -to_sun
+    for script in nodes:
+        script.inputs["light_is_sun"].default_value = 1
+        script.inputs["sun_dir"].default_value = -to_sun
 
 
-PAPER_MATERIAL = "BIR_CrosshatchPaper"
-
-
-def _paper_material():
-    mat = bpy.data.materials.get(PAPER_MATERIAL)
+def _get_ground_material():
+    """Ground variant: a copy of the TAM material with shadow_only=1 - white
+    paper that draws ONLY the cast shadow (the classic anchoring shadow of a
+    pen drawing). A plain lit TAM on the horizontal plane under the 38-degree
+    key would carpet the whole sheet in a monotone light wash instead."""
+    mat = bpy.data.materials.get(GROUND_MATERIAL)
     if mat is None:
-        from . import npr
-        mat = npr.make_flat_material((1.0, 1.0, 1.0), name=PAPER_MATERIAL)
+        mat = _get_material().copy()
+        mat.name = GROUND_MATERIAL
+        mat.use_fake_user = True
+    script = _script_node(mat)
+    if script is None:
+        raise RuntimeError("ground material lost its Script node")
+    script.filepath = _OSL
+    script.inputs["shadow_only"].default_value = 1
     return mat
 
 
 def apply_crosshatch(loaded, style="ink", uv_scale=0.5, ambient=0.15,
                      threshold=False):
-    """Assign the ONE shared TAM material to every model mesh. The synthetic
-    ground plane stays WHITE PAPER instead: it's scenography, not model - a
-    horizontal plane under the 38-degree key would otherwise carpet the whole
-    sheet in a monotone light wash (there are no cast shadows to draw on it).
+    """Assign the shared TAM material to every model mesh; the synthetic
+    ground plane gets the shadow-only variant (white paper + cast shadow).
     Real site geometry (has_site models) is model surface and hatches."""
+    bpy.context.view_layer.update()   # fresh matrix_world for the UV bakes
     objs = [o for o in loaded.node_to_object.values()
             if getattr(o, "type", None) == "MESH"]
-    ensure_tam_uv(objs)
+    ground = bpy.data.objects.get("BIR_Ground")
+    if ground is not None and ground.type == "MESH":
+        ensure_tam_uv(objs + [ground])
+        ground.data.materials.clear()
+        ground.data.materials.append(_get_ground_material())
+    else:
+        ensure_tam_uv(objs)
 
     mat = _get_material()
     for obj in objs:
         obj.data.materials.clear()
         obj.data.materials.append(mat)
-    ground = bpy.data.objects.get("BIR_Ground")
-    if ground is not None and ground.type == "MESH":
-        ground.data.materials.clear()
-        ground.data.materials.append(_paper_material())
     set_crosshatch(style=style, uv_scale=uv_scale, ambient=ambient,
                    threshold=threshold)
     aim_camera_key()
     return mat
 
 
-def set_crosshatch(style=None, uv_scale=None, ambient=None, threshold=None):
-    """Live update: poke script inputs in place (no rebuild, no retrace)."""
-    mat = bpy.data.materials.get(MATERIAL)
-    script = _script_node(mat) if mat else None
-    if script is None:
-        return
-    if style is not None:
-        script.inputs["tam_dir"].default_value = style_dir(str(style))
-    if uv_scale is not None:
-        script.inputs["uv_scale"].default_value = float(uv_scale)
-    if ambient is not None:
-        script.inputs["ambient"].default_value = float(ambient)
-    if threshold is not None:
-        script.inputs["threshold"].default_value = int(bool(threshold))
+def set_crosshatch(style=None, uv_scale=None, ambient=None, threshold=None,
+                   shadows=None):
+    """Live update: poke script inputs in place (no rebuild, no retrace).
+    Fans out to the ground variant so both stay in step."""
+    for script in _script_nodes():
+        if style is not None:
+            script.inputs["tam_dir"].default_value = style_dir(str(style))
+        if uv_scale is not None:
+            script.inputs["uv_scale"].default_value = float(uv_scale)
+        if ambient is not None:
+            script.inputs["ambient"].default_value = float(ambient)
+        if threshold is not None:
+            script.inputs["threshold"].default_value = int(bool(threshold))
+        if shadows is not None:
+            script.inputs["cast_shadows"].default_value = int(bool(shadows))
