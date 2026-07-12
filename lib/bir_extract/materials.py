@@ -19,61 +19,31 @@ DB = _compat.DB
 
 def extract_materials(doc, material_ids, link_docs=None):
     out = []
-    # DIAGNOSTIC (temporary): why does a material fall back to the flat "Default"
-    # grey? Everything-white renders mean every id failed to resolve to a
-    # DB.Material; this logs the reason so a re-extraction reveals the cause.
-    diag = {"resolved": 0, "default": 0}
-    reasons = {}
-    examples = []
+    resolved = 0
     for mid in sorted(material_ids):
         if mid == "mat_default":
             out.append(_default_record(mid))
             continue
         rec = None
-        reason = None
-        val = None
         try:
             owner, val = _resolve(doc, mid, link_docs or {})
-            if owner is None:
-                reason = "owner_none"
-            else:
-                el = owner.GetElement(_compat.make_element_id(val))
-                if el is None:
-                    reason = "getelement_none"
-                elif not isinstance(el, DB.Material):
-                    reason = "not_material:" + type(el).__name__
-                else:
-                    rec = _from_material(owner, el)
-                    rec["id"] = mid
-        except Exception as ex:
-            reason = "exc:" + type(ex).__name__ + ":" + str(ex)[:60]
-        if rec is not None:
-            diag["resolved"] += 1
-        else:
-            diag["default"] += 1
-            key = (reason or "unknown").split(":")[0]
-            reasons[key] = reasons.get(key, 0) + 1
-            if len(examples) < 8:
-                examples.append((mid, val, reason))
+            el = owner.GetElement(_compat.make_element_id(val)) \
+                if owner is not None else None
+            if isinstance(el, DB.Material):
+                rec = _from_material(owner, el)
+                rec["id"] = mid
+                resolved += 1
+        except Exception:
+            rec = None
         out.append(rec or _default_record(mid))
-    lines = ["Blendit materials: %d resolved, %d Default. reasons=%s"
-             % (diag["resolved"], diag["default"], reasons)]
-    for mid, val, reason in examples:
-        lines.append("  FAIL key=%s -> elementid=%s : %s" % (mid, val, reason))
-    text = "\n".join(lines)
+    # Warn (never fatal) when materials silently fall back to the flat "Default"
+    # grey - that reads as an all-white render, and a silent fallback is what hid
+    # the ElementId(int) ambiguity for days (see _compat.make_element_id).
     try:
-        print(text)
-    except Exception:
-        pass
-    # Also write to a fixed temp file so the root cause can be read directly
-    # (no need to copy the pyRevit console). Overwritten each extraction.
-    try:
-        import os
-        import tempfile
-        p = os.path.join(tempfile.gettempdir(), "blendit_material_diag.txt")
-        h = open(p, "w")
-        h.write(text)
-        h.close()
+        n = len(out)
+        if n and resolved < n:
+            print("Blendit: WARNING %d/%d materials fell back to Default grey "
+                  "(unresolved) - render may look flat/white." % (n - resolved, n))
     except Exception:
         pass
     return out
