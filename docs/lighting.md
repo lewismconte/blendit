@@ -79,8 +79,45 @@ The **extraction** can only be finished against a real model (the exact
 Load View on an interior model in Revit and read the printed per-light log, the
 established "iterate on real tracebacks" pattern.
 
+## Crosshatch: fixtures drive the hatch tone
+
+Crosshatch tone is computed analytically in the OSL shader (Cycles has no
+Shader-to-RGB), so Cycles lamps never reach its emission-only material. To let
+interior downlights shape the hatch — lighter where lit, denser where unlit —
+the fixtures ride into the shader the same way the TAM stroke PNGs do: a tiny
+float **EXR** the shader samples with `texture()`. (OSL Script nodes can't take
+array sockets, so 1000+ lamp positions can't be passed as parameters.)
+
+`hatch_tam.write_light_exr(cam_loc)` gathers the `BIR_Lights` lamps, keeps the
+`MAX_LIGHTS` (64) nearest the framed camera — re-culled per shot, like the
+artist's key — and writes a packed **1-row × 3·N-column RGB EXR**: for light
+`i`, column `3i` = world position (m), `3i+1` = spot aim (`0,0,0` = point),
+`3i+2` = `(watts, cos(field½), cos(beam½))`, all read at `v=0.5`. Width-packing
+(not rows) sidesteps any vertical-flip ambiguity. A NEW filepath each write
+(`_exr_serial`) defeats OIIO's texture cache so a re-gathered set actually takes
+effect. Two subtleties bit hard: the image's colorspace must be set to
+**Non-Color BEFORE** `foreach_set` (setting it after re-derives the buffer
+through the scene view transform and, under Standard view, zeroes the RGB); and
+lamp transforms must be depsgraph-**evaluated** before reading `matrix_world`
+(a stale identity packs every lamp at the origin, lighting nothing). The shader
+loops the columns per pixel, summing `energy · N·L · atten · spotcone` into the
+tone (`LIGHT_GAIN`, `LIGHT_FALLOFF`; both empirical — tune on a real interior).
+
+**No per-lamp shadow ray in v1**: the directional key's `trace()` still gives
+the room's big occlusion, but fixtures bleed through walls near them — which is
+why crosshatch defaults the contribution **OFF** (poor default for the common
+exterior shot) and it is opt-in via the same **Artificial Lights** toggle. In
+crosshatch the lamps don't render (emission material), so the master toggle and
+strength slider instead drive `refresh_lights()` (n_lights / light_gain); the
+per-shot `_refresh_crosshatch_key` re-writes the EXR so the nearest-N set tracks
+the frame. `refresh_lights` is guarded — a stale template that predates the four
+light sockets no-ops instead of crashing (rebuild it with
+`tools/build_crosshatch_template.py`).
+
 ## v2 hooks (noted, not built)
 
 IES photometric webs (ship as bundle files via the exporter's
 `_copy_texture_maps` pattern, load into spot lights); true line/area emitter
-geometry; physically absolute intensity; interior auto-exposure.
+geometry; physically absolute intensity; interior auto-exposure. For crosshatch:
+per-lamp shadow tracing (kills through-wall bleed, but costly at CPU), light
+colour tinting the ink, area emitters — the EXR layout leaves room (add a row).

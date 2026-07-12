@@ -140,3 +140,16 @@ Tuning that MATTERS (each was a visible failure before it was fixed):
   surface could ever draw past the mid sparse-dash column.
 - **20° sun-altitude floor** on the shader input only (used when following
   the scene sun; the artist's key sits at 38° by construction).
+
+## Artificial fixtures in the tone (Crosshatch only)
+
+Beyond the paper (whose tone is a single light direction), the Crosshatch mode
+can sum Revit's artificial fixtures into the tone so interiors hatch lighter
+where downlights pool. Because OSL Script nodes can't take array sockets, the
+nearest 64 `BIR_Lights` lamps are packed into a 1-row float EXR that the shader
+reads per pixel (`hatch_tam.write_light_exr` / `refresh_lights`, four new shader
+sockets: `light_data`, `n_lights`, `light_gain`, `light_falloff`). It is opt-in
+(default OFF — v1 has no per-lamp shadow ray, so lamps bleed through walls) and
+driven by Live View's **Artificial Lights** toggle. Full detail, EXR layout, and
+tuning constants live in `docs/lighting.md`. Adding these sockets means the
+template must be rebuilt with `tools/build_crosshatch_template.py`.

@@ -56,6 +56,19 @@ shader tam_hatch(
     int cast_shadows = 1,       // trace() a shadow ray toward the tone light
     float shadow_bias = 0.05,   // metres of normal offset (self-hit guard)
     int shadow_only = 0,        // ground mode: white paper unless occluded
+    // Artificial fixtures (interior downlights etc.) sum INTO the tone, so the
+    // hatch lightens where lamps pool. OSL Script nodes can't take array
+    // sockets, so the nearest-N fixtures ride in a tiny packed EXR the shader
+    // loops over per-pixel (same texture() mechanism the TAM PNGs use). Layout:
+    // 1 row x (3*n_lights) cols, RGB float; light i occupies cols 3i..3i+2,
+    // all read at v=0.5:
+    //   3i   = position (x,y,z), world metres
+    //   3i+1 = spot aim (x,y,z) unit; (0,0,0) => point (omnidirectional)
+    //   3i+2 = (energy watts, cos(field half-angle), cos(beam half-angle))
+    string light_data = "",     // packed fixture EXR ("" => none)
+    int n_lights = 0,           // 0 => skip the fixture loop entirely
+    float light_gain = 0.02,    // watts -> tone scale (tuned per interior)
+    float light_falloff = 0.15, // distance attenuation k in 1/(1 + d2*k)
     float ambient = 0.05,
     float kd = 1.1,
     float uv_scale = 6.0,
@@ -111,7 +124,41 @@ shader tam_hatch(
         } else {
             if (occluded)
                 ndl = 0.0;
-            tone = clamp(ambient + kd * ndl, 0.0, 1.0);
+            tone = ambient + kd * ndl;
+            // Artificial fixtures add to the tone (hatch lightens where lamps
+            // pool). No per-lamp shadow ray in v1 - the directional key's
+            // trace() still gives the room's big occlusion; the tradeoff is
+            // through-wall bleed near fixtures. Read the packed EXR per light.
+            if (n_lights > 0 && light_data != "") {
+                float w = 3.0 * (float) n_lights;
+                float acc = 0.0;
+                for (int i = 0; i < n_lights; i++) {
+                    float base = 3.0 * (float) i;
+                    color p3 = (color) texture(light_data, (base + 0.5) / w, 0.5,
+                        "interp", "closest", "wrap", "clamp", "width", 0.0);
+                    color d3 = (color) texture(light_data, (base + 1.5) / w, 0.5,
+                        "interp", "closest", "wrap", "clamp", "width", 0.0);
+                    color e3 = (color) texture(light_data, (base + 2.5) / w, 0.5,
+                        "interp", "closest", "wrap", "clamp", "width", 0.0);
+                    point lp = point(p3[0], p3[1], p3[2]);
+                    vector Ld = lp - P;
+                    float d2 = dot(Ld, Ld);
+                    float ndl2 = max(dot(Nn, normalize(Ld)), 0.0);
+                    float atten = 1.0 / (1.0 + d2 * light_falloff);
+                    float spot = 1.0;
+                    vector sd = vector(d3[0], d3[1], d3[2]);
+                    if (dot(sd, sd) > 0.25) {   // spot: cone falloff
+                        float ca = dot(normalize(sd), normalize(P - lp));
+                        if (e3[2] > e3[1] + 1.0e-4)
+                            spot = smoothstep(e3[1], e3[2], ca);
+                        else
+                            spot = (ca >= e3[1]) ? 1.0 : 0.0;
+                    }
+                    acc += e3[0] * ndl2 * atten * spot;
+                }
+                tone += acc * light_gain;
+            }
+            tone = clamp(tone, 0.0, 1.0);
         }
     }
 

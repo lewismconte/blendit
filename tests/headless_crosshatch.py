@@ -141,6 +141,70 @@ def main():
     assert d > 0.005, "charcoal switch changed nothing (diff %.5f)" % d
     print("style switch OK (diff %.4f)" % d)
 
+    # --- artificial fixtures drive the hatch tone --------------------------
+    # (1) the packed light-data EXR round-trips: each texel equals the lamp it
+    # was written from (this is the de-risk spike - OSL reads exactly these).
+    coll = bpy.data.collections.get("BIR_Lights")
+    assert coll is not None and len(coll.objects) >= 2, \
+        "fixture should carry its 2 Revit lamps in BIR_Lights"
+    lpath, count = hatch_tam.write_light_exr((0.0, 0.0, 0.0))
+    assert count == len(coll.objects), \
+        "packed %d of %d lamps" % (count, len(coll.objects))
+    ld = bpy.data.images.load(lpath, check_existing=False)
+    try:
+        assert tuple(ld.size) == (3 * count, 1), \
+            "light EXR shape %r != (%d, 1)" % (tuple(ld.size), 3 * count)
+        lpx = np.empty(3 * count * 4, dtype=np.float32)
+        ld.pixels.foreach_get(lpx)
+        lpx = lpx.reshape(3 * count, 4)      # one row: index by column
+    finally:
+        bpy.data.images.remove(ld)
+    lamps = sorted(coll.objects,            # write_light_exr's nearest-first order
+                   key=lambda o: o.matrix_world.translation.length_squared)
+    for i, o in enumerate(lamps):
+        wp = o.matrix_world.translation
+        got = lpx[3 * i, :3]
+        assert max(abs(got[0] - wp.x), abs(got[1] - wp.y),
+                   abs(got[2] - wp.z)) < 1e-3, \
+            "%s packed pos %r != world %r" % (o.name, tuple(got), tuple(wp))
+        assert lpx[3 * i + 2, 0] > 0.0, "%s packed zero energy" % o.name
+    print("light-data EXR round-trip OK (%d lamps packed)" % count)
+
+    # (2) the OSL fixture loop RESPONDS: a bright lamp in front of a VISIBLE face
+    # lightens its hatch. (The fixture's own lamps sit inside the closed box,
+    # lighting only unseen inner faces - so add one facing the camera-side wall.)
+    hatch_tam.set_crosshatch(style="ink", uv_scale=0.5, ambient=0.15,
+                             threshold=False, shadows=True)
+    hatch_tam.refresh_lights(strength=1.0, enabled=False)
+    sc.render.filepath = os.path.join(_OUT_DIR, "crosshatch_unlit.png")
+    bpy.ops.render.render(write_still=True)
+    unlit = _luma(sc.render.filepath)
+
+    probe_data = bpy.data.lights.new("BIR_Lights_probe", type="POINT")
+    probe_data.energy = 2000.0
+    probe = bpy.data.objects.new("BIR_Lights_probe", probe_data)
+    probe.location = (1.5, -2.5, 1.5)    # metres: in front of the box's -Y face
+    coll.objects.link(probe)
+    # Evaluate the new lamp's transform BEFORE refresh_lights reads matrix_world -
+    # a stale identity matrix would pack the probe at the origin (lighting nothing
+    # the camera sees) and the delta would be a misleading zero.
+    bpy.context.view_layer.update()
+    hatch_tam.refresh_lights(strength=1.0, enabled=True)
+    sc.render.filepath = os.path.join(_OUT_DIR, "crosshatch_lit.png")
+    bpy.ops.render.render(write_still=True)
+    lit = _luma(sc.render.filepath)
+
+    hatch_tam.refresh_lights(strength=1.0, enabled=False)   # restore no fixtures
+    bpy.data.objects.remove(probe, do_unlink=True)
+    dlit = float(np.abs(unlit - lit).mean())
+    assert dlit > 0.003, \
+        "artificial-light toggle changed nothing (diff %.5f): the OSL fixture " \
+        "loop or the light-data EXR read is dead" % dlit
+    assert lit.mean() > unlit.mean(), \
+        "fixtures should LIGHTEN the hatch (mean %.3f !> %.3f)" % \
+        (lit.mean(), unlit.mean())
+    print("fixtures drive hatch tone OK (lit diff %.4f)" % dlit)
+
     # --- mode round-trip: flags self-heal (the shared-spec leak regression).
     # setup_engine derives shading_system/device/denoise from render.mode, so
     # a realistic re-apply must undo every crosshatch flag WITHOUT the spec

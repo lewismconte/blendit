@@ -298,6 +298,12 @@ def _update_lights_enabled(self, context):
         return
     from blender.pipeline import lights
     lights.set_lights_visible(self.lights_enabled)
+    # Crosshatch tone is analytic, so the lamps don't render - they feed the
+    # in-shader hatch sum instead. Drive that from the same master toggle.
+    if self.mode == "crosshatch":
+        from blender.pipeline import hatch_tam
+        hatch_tam.refresh_lights(strength=self.lights_strength,
+                                 enabled=self.lights_enabled)
 
 
 def _update_lights_strength(self, context):
@@ -305,6 +311,9 @@ def _update_lights_strength(self, context):
         return
     from blender.pipeline import lights
     lights.set_lights_strength(self.lights_strength)
+    if self.mode == "crosshatch" and self.lights_enabled:
+        from blender.pipeline import hatch_tam
+        hatch_tam.refresh_lights(strength=self.lights_strength, enabled=True)
 
 
 def _update_mode(self, context):
@@ -542,13 +551,17 @@ def _update_crosshatch_key(self, context):
 
 
 def _refresh_crosshatch_key(st):
-    """Re-derive the crosshatch tone key from the CURRENT camera before a
-    render (the shot may have been reframed since the mode was applied).
-    No-op in follow-scene-sun mode or outside crosshatch."""
-    if st is None or st.mode != "crosshatch" or st.crosshatch_follow_sun:
+    """Before a render, re-derive the crosshatch tone from the CURRENT camera:
+    the artist's key direction AND the nearest-N artificial fixtures both track
+    the framed shot (it may have been reframed since the mode was applied).
+    No-op outside crosshatch."""
+    if st is None or st.mode != "crosshatch":
         return
     from blender.pipeline import hatch_tam
-    hatch_tam.aim_camera_key()
+    if st.lights_enabled:                       # re-cull lamps around the shot
+        hatch_tam.refresh_lights(strength=st.lights_strength, enabled=True)
+    if not st.crosshatch_follow_sun:            # key: not driven by the sun
+        hatch_tam.aim_camera_key()
 
 
 def _update_depth_cue(self, context):
@@ -705,6 +718,10 @@ def _apply_mode(mode):
                                      ambient=st.crosshatch_ambient,
                                      threshold=st.crosshatch_ink,
                                      shadows=st.crosshatch_shadows)
+            # Re-seed the fixture contribution to match the master toggle (the
+            # preset reset it OFF); lamps feed the hatch tone, not the render.
+            hatch_tam.refresh_lights(strength=st.lights_strength,
+                                     enabled=st.lights_enabled)
     if mode in _LINE_MODES:
         # The preset built a fresh procedural Line Art; let it trace once, then
         # freeze it so export / render / capture reuse it instead of recomputing.

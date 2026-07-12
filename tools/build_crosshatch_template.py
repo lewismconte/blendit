@@ -36,7 +36,8 @@ UV_LAYER = "TamUV"
 
 EXPECTED_SOCKETS = [
     "UVIn", "ambient", "cast_shadows", "debug_lod", "fixed_tone", "kd",
-    "light_is_sun", "light_pos", "shadow_bias", "shadow_only", "sun_dir",
+    "light_data", "light_falloff", "light_gain", "light_is_sun", "light_pos",
+    "n_lights", "shadow_bias", "shadow_only", "sun_dir",
     "swap_uv", "tam_dir", "threshold", "tone_mode", "use_uv_socket",
     "uv_name", "uv_scale", "v_aspect",
 ]
@@ -60,6 +61,12 @@ DEFAULTS = {
     "cast_shadows": 1,   # trace() occlusion toward the tone light
     "shadow_bias": 0.05,  # 1mm self-hit; coarse Revit tessellation needs cm
     "shadow_only": 0,    # hatch_tam sets 1 on the ground material copy
+    # Artificial fixtures ship OFF (n_lights 0); hatch_tam.refresh_lights writes
+    # the packed EXR + count when the Live "Artificial Lights" toggle is on.
+    "light_data": "",
+    "n_lights": 0,
+    "light_gain": 0.02,     # keep in step with hatch_tam.LIGHT_GAIN
+    "light_falloff": 0.15,  # keep in step with hatch_tam.LIGHT_FALLOFF
 }
 
 

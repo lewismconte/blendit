@@ -55,6 +55,18 @@ _OSL = os.path.join(_RES_DIR, "tam_hatch.osl")
 # input is clamped - the actual lamp (and Line Art shadows) stay site-accurate.
 MIN_SUN_ALTITUDE_DEG = 20.0
 
+# Artificial fixtures -> crosshatch tone. The nearest MAX_LIGHTS BIR_Lights
+# lamps ride into the OSL shader as a packed EXR (write_light_exr); the shader
+# sums their Lambert contribution into the tone so hatch lightens where lamps
+# pool. GAIN maps lamp watts to the [0,1] tone range; FALLOFF is the distance
+# attenuation k in 1/(1 + d2*k). Both are empirical - tune on a real interior
+# (see docs/lighting.md). Kept in step with build_crosshatch_template.DEFAULTS.
+MAX_LIGHTS = 64
+LIGHT_GAIN = 0.02
+LIGHT_FALLOFF = 0.15
+_exr_serial = 0     # bump per write: a NEW path each time defeats OIIO's texture
+                    # cache, so a re-gathered light set actually takes effect.
+
 
 def style_dir(style):
     """Absolute tam_<style> dir with FORWARD slashes (OSL format() path)."""
@@ -258,6 +270,11 @@ def apply_crosshatch(loaded, style="ink", uv_scale=0.5, ambient=0.15,
     set_crosshatch(style=style, uv_scale=uv_scale, ambient=ambient,
                    threshold=threshold)
     aim_camera_key()
+    # Seed the fixture sockets to a known OFF state (n_lights 0). Crosshatch
+    # defaults to no artificial-light contribution - the interior look is opt-in
+    # via Live View's "Artificial Lights" toggle (through-wall bleed makes it a
+    # poor default for the common exterior shot). refresh_lights below flips it.
+    refresh_lights(strength=1.0, enabled=False)
     return mat
 
 
@@ -276,3 +293,110 @@ def set_crosshatch(style=None, uv_scale=None, ambient=None, threshold=None,
             script.inputs["threshold"].default_value = int(bool(threshold))
         if shadows is not None:
             script.inputs["cast_shadows"].default_value = int(bool(shadows))
+
+
+# --- artificial fixtures drive the hatch tone -------------------------------
+def _set_input(script, name, value):
+    """Poke a script socket if it exists. Guarded so refresh_lights is a no-op
+    against a stale template that predates the light sockets (the Python lands
+    safely before build_crosshatch_template.py is re-run)."""
+    sock = script.inputs.get(name)
+    if sock is not None:
+        sock.default_value = value
+
+
+def _lamp_world(obj):
+    """(position, spot-aim | None, energy watts, cos(field half), cos(beam half))
+    for a BIR_Lights lamp, read straight off its world matrix (already metres)."""
+    from mathutils import Vector
+    mw = obj.matrix_world
+    pos = mw.translation
+    data = obj.data
+    # UNSCALED base watts: Live's "Lights Strength" scales data.energy for the
+    # lit modes (set_lights_strength stashes bir_base_watts); here that slider
+    # instead drives light_gain, so read the base to avoid double-counting.
+    watts = obj.get("bir_base_watts", getattr(data, "energy", 0.0))
+    aim = None
+    cos_outer, cos_inner = -1.0, 1.0
+    if getattr(data, "type", "") == "SPOT":
+        aim = (mw.to_quaternion() @ Vector((0.0, 0.0, -1.0))).normalized()
+        half_field = min(math.radians(89.5),
+                         float(getattr(data, "spot_size", math.pi * 0.5)) * 0.5)
+        blend = max(0.0, min(1.0, float(getattr(data, "spot_blend", 0.15))))
+        half_beam = half_field * (1.0 - blend)
+        cos_outer = math.cos(half_field)
+        cos_inner = math.cos(half_beam)
+    return pos, aim, float(watts), cos_outer, cos_inner
+
+
+def write_light_exr(cam_loc):
+    """Gather BIR_Lights, keep the MAX_LIGHTS nearest cam_loc, write a packed
+    float EXR (1 row x 3*N cols, RGB) into the session tempdir. Returns
+    (forward-slash path, count); ("", 0) when there are no fixtures.
+
+    Width-packing (not rows) sidesteps any vertical-flip ambiguity: the shader
+    reads all three texels of light i at v=0.5, columns 3i..3i+2. Callers MUST
+    have the lamp transforms evaluated (view_layer.update) before this reads
+    obj.matrix_world - a stale identity matrix packs every lamp at the origin.
+
+    The nearest-N cull is re-run per camera (like aim_camera_key) so a big Revit
+    model with hundreds of fixtures only ever ships the lamps around the shot."""
+    global _exr_serial
+    coll = bpy.data.collections.get("BIR_Lights")
+    lamps = [o for o in (coll.objects if coll else []) if getattr(o, "data", None)]
+    if not lamps:
+        return "", 0
+    cam = Vector(cam_loc)
+    lamps.sort(key=lambda o: (o.matrix_world.translation - cam).length_squared)
+    lamps = lamps[:MAX_LIGHTS]
+    n = len(lamps)
+
+    buf = np.zeros((n * 3, 4), dtype=np.float32)   # Blender image px are RGBA
+    for i, o in enumerate(lamps):
+        pos, aim, watts, co, ci = _lamp_world(o)
+        buf[3 * i, 0:3] = (pos.x, pos.y, pos.z)
+        if aim is not None:
+            buf[3 * i + 1, 0:3] = (aim.x, aim.y, aim.z)
+        buf[3 * i + 2, 0:3] = (watts, co, ci)
+    buf[:, 3] = 1.0
+
+    img = bpy.data.images.new("BIR_LightData", width=n * 3, height=1,
+                              float_buffer=True, alpha=False)
+    try:
+        # Non-Color BEFORE foreach_set: assigning the colorspace AFTER the pixel
+        # write re-derives the buffer through the scene's view transform and, in
+        # a Standard-view scene (crosshatch uses set_flat_view), ZEROED the RGB
+        # while alpha survived - the packed positions came back (0,0,0).
+        img.colorspace_settings.name = "Non-Color"   # raw data, no view xform
+        img.pixels.foreach_set(buf.ravel())
+        _exr_serial += 1
+        path = os.path.join(bpy.app.tempdir, "bir_lightdata_%d.exr" % _exr_serial)
+        img.filepath_raw = path
+        img.file_format = "OPEN_EXR"
+        img.save()
+    finally:
+        bpy.data.images.remove(img)   # the .exr on disk persists; drop the block
+    return path.replace("\\", "/"), n
+
+
+def refresh_lights(strength=1.0, enabled=True):
+    """(Re)write the light-data EXR from the current scene camera and poke the
+    crosshatch material's fixture sockets. No-op when no crosshatch material
+    exists. n_lights=0 (shader skips the loop) when disabled or no fixtures.
+
+    The shadow_only ground material also receives the sockets, but its shader
+    branch never runs the fixture loop, so lamps never paint the paper."""
+    nodes = _script_nodes()
+    if not nodes:
+        return
+    path, count = "", 0
+    if enabled:
+        cam = bpy.context.scene.camera
+        loc = cam.matrix_world.translation if cam is not None else (0.0, 0.0, 0.0)
+        path, count = write_light_exr(loc)
+    gain = LIGHT_GAIN * (1.0 if strength is None else float(strength))
+    for script in nodes:
+        _set_input(script, "light_data", path)
+        _set_input(script, "n_lights", int(count))
+        _set_input(script, "light_gain", float(gain))
+        _set_input(script, "light_falloff", float(LIGHT_FALLOFF))
