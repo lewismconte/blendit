@@ -680,6 +680,16 @@ def _apply_mode(mode):
     apply_look(_SPEC)
     setup_world(_SPEC, _SCALE)
     get_preset(mode)(_LOADED, _SPEC)
+    # Gate the artificial lights by mode (mirrors prepare_scene). WITHOUT this,
+    # switching realistic -> an NPR mode in Live View left the lamps visible, and
+    # they washed out the EEVEE Shader-to-RGB tone the drawing looks derive from
+    # the sun - the styles looked "not applied". Headless rebuilds fresh so it was
+    # never hit there.
+    try:
+        from blender.pipeline.lights import set_lights_visible, default_visible_for
+        set_lights_visible(default_visible_for(mode))
+    except Exception:
+        pass
     setup_engine(_SPEC)
     _sync_settings_from_scene()
     _apply_user_sun(getattr(bpy.context.scene, "bir", None))  # keep the user's sun
