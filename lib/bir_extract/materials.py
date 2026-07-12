@@ -19,21 +19,50 @@ DB = _compat.DB
 
 def extract_materials(doc, material_ids, link_docs=None):
     out = []
+    # DIAGNOSTIC (temporary): why does a material fall back to the flat "Default"
+    # grey? Everything-white renders mean every id failed to resolve to a
+    # DB.Material; this logs the reason so a re-extraction reveals the cause.
+    diag = {"resolved": 0, "default": 0}
+    reasons = {}
+    examples = []
     for mid in sorted(material_ids):
         if mid == "mat_default":
             out.append(_default_record(mid))
             continue
         rec = None
+        reason = None
+        val = None
         try:
             owner, val = _resolve(doc, mid, link_docs or {})
-            el = owner.GetElement(_compat.make_element_id(val)) \
-                if owner is not None else None
-            if isinstance(el, DB.Material):
-                rec = _from_material(owner, el)
-                rec["id"] = mid
-        except Exception:
-            rec = None
+            if owner is None:
+                reason = "owner_none"
+            else:
+                el = owner.GetElement(_compat.make_element_id(val))
+                if el is None:
+                    reason = "getelement_none"
+                elif not isinstance(el, DB.Material):
+                    reason = "not_material:" + type(el).__name__
+                else:
+                    rec = _from_material(owner, el)
+                    rec["id"] = mid
+        except Exception as ex:
+            reason = "exc:" + type(ex).__name__ + ":" + str(ex)[:60]
+        if rec is not None:
+            diag["resolved"] += 1
+        else:
+            diag["default"] += 1
+            key = (reason or "unknown").split(":")[0]
+            reasons[key] = reasons.get(key, 0) + 1
+            if len(examples) < 8:
+                examples.append((mid, val, reason))
         out.append(rec or _default_record(mid))
+    try:
+        print("Blendit materials: %d resolved, %d Default. reasons=%s"
+              % (diag["resolved"], diag["default"], reasons))
+        for mid, val, reason in examples:
+            print("  FAIL key=%s -> elementid=%s : %s" % (mid, val, reason))
+    except Exception:
+        pass
     return out
 
 
