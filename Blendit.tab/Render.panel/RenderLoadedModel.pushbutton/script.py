@@ -14,7 +14,7 @@ Shift+Click: the same render at FINAL quality (Cycles, high samples, denoised)
 - liked the draft? One click gets the keeper, without touching your Quality
 setting.
 """
-__title__ = "Render\nLoaded"
+__title__ = "Render\nView"
 __author__ = "Blendit"
 
 import bir_bootstrap
