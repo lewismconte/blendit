@@ -143,19 +143,65 @@ def _element(rec_doc, eid):
         return None
 
 
-def _location_xyz(el):
-    """Fixture position in feet from its LocationPoint, when OnLight gave none."""
+def _location_point(el):
+    """Fixture insertion XYZ (feet, its document's model coords), or None. This
+    is the fixture's real placement in the building - spread across the plan -
+    unlike the light node's family-local transform."""
     try:
-        loc = el.Location
-        p = loc.Point
-        return (p.X, p.Y, p.Z)
+        p = el.Location.Point           # LocationPoint (FamilyInstance fixtures)
+        return p
     except Exception:
         return None
 
 
+def _world_position(el, link_xf):
+    """Location.Point, lifted through the LINK transform for linked fixtures
+    (Location is already in the link document's model coords, so ONLY the link
+    transform is applied - never the walk's instance transform, which would
+    double-transform: the same rule OnRPC follows for trees)."""
+    p = _location_point(el)
+    if p is None:
+        return None
+    if link_xf is not None:
+        try:
+            p = link_xf.OfPoint(p)
+        except Exception:
+            pass
+    return (p.X, p.Y, p.Z)
+
+
+def _world_aim(el, link_xf):
+    """Fixture aim direction (unit-ish), lifted through the link transform. Most
+    ceiling fixtures shine DOWN; use the family's FacingOrientation when it reads
+    downward-ish, else straight down. Direction is only a rotation, so apply the
+    link transform's basis (OfVector), not OfPoint."""
+    aim = None
+    try:
+        f = el.FacingOrientation          # family facing, model coords
+        if abs(f.X) + abs(f.Y) + abs(f.Z) > 1e-6:
+            aim = f
+    except Exception:
+        aim = None
+    if aim is not None and link_xf is not None:
+        try:
+            aim = link_xf.OfVector(aim)
+        except Exception:
+            pass
+    if aim is None:
+        return (0.0, 0.0, -1.0)
+    # A fixture "facing" is often its up/normal; a ceiling light should light the
+    # room BELOW. If the facing points up, flip it down.
+    z = aim.Z
+    v = (aim.X, aim.Y, aim.Z)
+    if z > 0.05:
+        v = (-aim.X, -aim.Y, -aim.Z)
+    return v
+
+
 def resolve_lights(light_refs, host_doc, log=None):
     """-> list[light dict] from the OnLight captures. Each ref:
-    {doc, scope, eid, pos, dir}. Photometrics read off the fixture element."""
+    {doc, scope, eid, link_xf}. Position from the element's Location.Point,
+    photometrics from its parameters."""
     out = []
     if not light_refs:
         return out
@@ -165,14 +211,15 @@ def resolve_lights(light_refs, host_doc, log=None):
             rdoc = rec.get("doc") or host_doc
             eid = rec.get("eid")
             el = _element(rdoc, eid) if eid is not None else None
-            pos = rec.get("pos")
-            if pos is None and el is not None:
-                pos = _location_xyz(el)
+            if el is None:
+                continue
+            link_xf = rec.get("link_xf")
+            pos = _world_position(el, link_xf)
             if pos is None:
                 continue                     # no placement -> can't place a lamp
+            aim = _world_aim(el, link_xf)
             n += 1
-            lid = "light_%d" % n
-            out.append(_light_dict(lid, pos, rec.get("dir"), el, log))
+            out.append(_light_dict("light_%d" % n, pos, aim, el, log))
         except Exception:
             pass
     return out
@@ -195,22 +242,12 @@ def extract_lights_collector(doc, view, log=None):
     n = 0
     for el in col:
         try:
-            pos = _location_xyz(el)
+            pos = _world_position(el, None)     # host: no link transform
             if pos is None:
                 continue
-            aim = _facing_down(el)
+            aim = _world_aim(el, None)
             n += 1
             out.append(_light_dict("light_%d" % n, pos, aim, el, log))
         except Exception:
             pass
     return out
-
-
-def _facing_down(el):
-    """Best-effort aim: a fixture's FacingOrientation, else straight down."""
-    try:
-        f = el.FacingOrientation
-        # most ceiling fixtures face up in family space; shine DOWN into the room
-        return (-f.X, -f.Y, -f.Z)
-    except Exception:
-        return (0.0, 0.0, -1.0)

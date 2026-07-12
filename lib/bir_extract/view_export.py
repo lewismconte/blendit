@@ -253,39 +253,26 @@ class _Context(DB.IExportContext):
 
     def OnLight(self, node):
         # WYSIWYG light capture: the exporter only calls this for lights actually
-        # DISPLAYED in the view (visibility already applied). Record the fixture's
-        # world placement + element ref; lights.resolve_lights reads photometrics
-        # from the element afterwards (the RPC-proxy pattern). Never raise - a bad
-        # light must not abort the geometry walk.
+        # DISPLAYED in the view (visibility already applied). Record the fixture
+        # element + its LINK transform only, exactly like OnRPC - NOT the light
+        # node's own transform. That node transform is the light's LOCAL offset
+        # inside the family (a downlight sits at ~(0,0,mount_height) in family
+        # space), so using it clumped every fixture onto the vertical axis.
+        # lights.resolve_lights derives the real world position from the
+        # element's Location.Point (already in its document's model coords), with
+        # the link transform applied for linked fixtures - the RPC insight.
+        # Never raise - a bad light must not abort the geometry walk.
         try:
             eid = self._elem_ids[-1] if self._elem_ids else None
+            if eid is None:
+                return
             scope = self._scope[-1]
-            key = (scope, _compat.id_value(eid) if eid is not None else id(node))
+            key = (scope, _compat.id_value(eid))
             if key in self._light_seen:
                 return
             self._light_seen.add(key)
-            pos = None
-            aim = None
-            xf = None
-            try:
-                xf = node.GetTransform()      # light's world transform, if exposed
-            except Exception:
-                xf = None
-            if xf is None:
-                xf = self._xf[-1]             # fall back to the instance placement
-            if xf is not None:
-                try:
-                    o = xf.OfPoint(DB.XYZ(0.0, 0.0, 0.0))
-                    pos = (o.X, o.Y, o.Z)
-                except Exception:
-                    pos = None
-                try:
-                    z = xf.OfVector(DB.XYZ(0.0, 0.0, -1.0))   # emit down local -Z
-                    aim = (z.X, z.Y, z.Z)
-                except Exception:
-                    aim = None
             self.lights.append({"doc": self._docs[-1], "scope": scope,
-                                "eid": eid, "pos": pos, "dir": aim})
+                                "eid": eid, "link_xf": self._link_xf[-1]})
         except Exception:
             pass
 
