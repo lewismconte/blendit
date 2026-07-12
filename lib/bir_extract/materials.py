@@ -56,11 +56,24 @@ def extract_materials(doc, material_ids, link_docs=None):
             if len(examples) < 8:
                 examples.append((mid, val, reason))
         out.append(rec or _default_record(mid))
+    lines = ["Blendit materials: %d resolved, %d Default. reasons=%s"
+             % (diag["resolved"], diag["default"], reasons)]
+    for mid, val, reason in examples:
+        lines.append("  FAIL key=%s -> elementid=%s : %s" % (mid, val, reason))
+    text = "\n".join(lines)
     try:
-        print("Blendit materials: %d resolved, %d Default. reasons=%s"
-              % (diag["resolved"], diag["default"], reasons))
-        for mid, val, reason in examples:
-            print("  FAIL key=%s -> elementid=%s : %s" % (mid, val, reason))
+        print(text)
+    except Exception:
+        pass
+    # Also write to a fixed temp file so the root cause can be read directly
+    # (no need to copy the pyRevit console). Overwritten each extraction.
+    try:
+        import os
+        import tempfile
+        p = os.path.join(tempfile.gettempdir(), "blendit_material_diag.txt")
+        h = open(p, "w")
+        h.write(text)
+        h.close()
     except Exception:
         pass
     return out
