@@ -29,11 +29,11 @@ locking your work in.
 
 ## What you get
 
-- 🎨 **Fifteen render looks** — photoreal, white-card / clay massing, a sun-accurate
+- 🎨 **Sixteen render looks** — photoreal, white-card / clay massing, a sun-accurate
   shadow study, a dark showroom, and a stylised drawing/print family: **linework, pen,
-  sketch, cel, hatch, yellowtrace, brown paper, blueprint, diagram, watercolor, and
-  risograph**. Pick one on the ribbon (hover for a preview); switch live in the review
-  session — or render a **contact sheet** of your shot in all fifteen at once.
+  sketch, cel, hatch, crosshatch, yellowtrace, brown paper, blueprint, diagram,
+  watercolor, and risograph**. Pick one on the ribbon (hover for a preview); switch live
+  in the review session — or render a **contact sheet** of your shot in all sixteen at once.
 - ☁️ **Atmosphere & weather** — procedural **volumetric clouds** and sky: seven cloud
   types (fair-weather cumulus → overcast → towering storm), a live sun / time-of-day,
   and a 360° storm-ring mode. All procedural — no downloads, no huge sky files.
@@ -64,7 +64,7 @@ locking your work in.
   scene in the background, so **Open View** typically opens in seconds; the model is
   cached and it's tuned to stay quick even on big, detailed, multi-link models.
 
-## The fifteen looks
+## The sixteen looks
 
 Every mode, one click apart (the built-in demo scene — hover any Mode button in
 Revit for the same previews):
@@ -77,10 +77,12 @@ Revit for the same previews):
 | **Specular (showroom)** | **Linework** | **Pen** |
 | ![Sketch](media/modes/sketch.png) | ![Cel](media/modes/cel.png) | ![Hatch](media/modes/hatch.png) |
 | **Sketch** | **Cel / Anime** | **Hatch** |
-| ![Yellowtrace](media/modes/yellowtrace.png) | ![Brown Paper](media/modes/kraft.png) | ![Blueprint](media/modes/blueprint.png) |
-| **Yellowtrace** | **Brown Paper** | **Blueprint** |
-| ![Diagram](media/modes/diagram.png) | ![Watercolor](media/modes/watercolor.png) | ![Risograph](media/modes/risograph.png) |
-| **Diagram** | **Watercolor** | **Risograph** |
+| ![Crosshatch](media/modes/crosshatch.png) | ![Yellowtrace](media/modes/yellowtrace.png) | ![Brown Paper](media/modes/kraft.png) |
+| **Crosshatch** | **Yellowtrace** | **Brown Paper** |
+| ![Blueprint](media/modes/blueprint.png) | ![Diagram](media/modes/diagram.png) | ![Watercolor](media/modes/watercolor.png) |
+| **Blueprint** | **Diagram** | **Watercolor** |
+| ![Risograph](media/modes/risograph.png) | | |
+| **Risograph** | | |
 
 ## Requirements
 
@@ -184,9 +186,9 @@ everything else is built on top of it.
 - **Deep dive & design rationale:** [CLAUDE.md](CLAUDE.md)
 - **The data contract:** [docs/contract.md](docs/contract.md) · **dev loop:**
   [docs/dev-loop.md](docs/dev-loop.md)
+- **Hatch & Crosshatch design note:** [hatch TAMs](docs/hatch-tam.md)
 - **Parked designs:** [live-sync](docs/live-sync.md) ·
-  [live-sync build plan](docs/live-sync-plan.md) · [entourage](docs/entourage.md) ·
-  [hatch TAMs](docs/hatch-tam.md)
+  [live-sync build plan](docs/live-sync-plan.md) · [entourage](docs/entourage.md)
 
 The tests run **headless under `bpy` — no Revit required**. Render the bundled fixture
 without any of Revit:
@@ -200,8 +202,8 @@ blender --background --python blender/headless/render.py -- ^
 ```
 
 `MODE`: `realistic`, `white`, `shadow`, `specular`, `linework`, `pen`, `sketch`,
-`cel`, `hatch`, `yellowtrace`, `kraft`, `blueprint`, `diagram`, `watercolor`,
-`risograph`. All modes at once: `blender --background --python tests/smoke_render.py`.
+`cel`, `hatch`, `crosshatch`, `yellowtrace`, `kraft`, `blueprint`, `diagram`,
+`watercolor`, `risograph`. All modes at once: `blender --background --python tests/smoke_render.py`.
 
 Verified on Blender 5.0 / 5.1; Blender 4.2 LTS is the intended floor (API differences
 are handled at runtime, but treat 4.2 as best-effort until re-verified).

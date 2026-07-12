@@ -14,6 +14,9 @@ venv/
 # Blender
 *.blend1
 *.blend2
+# oslc drops the compiled cache next to the .osl at render/compile time;
+# Cycles rebuilds it on demand, and a stale one is a subtle failure mode.
+*.oso
 
 # Render / bundle output (generated at runtime, never committed)
 /out/

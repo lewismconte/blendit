@@ -4,7 +4,9 @@
         --bundle "<scene_spec.json or bundle dir>" --out "<output.png>" \
         [--engine CYCLES|EEVEE] [--mode MODE] [--samples N] [--camera persp|ortho]
 
-MODE is one of: realistic, white, shadow, specular, linework, pen, sketch, cel, hatch.
+MODE is one of the sixteen looks in bir_contract.scene_spec.RENDER_MODES
+(realistic, white, shadow, specular, linework, pen, sketch, cel, hatch,
+crosshatch, yellowtrace, kraft, blueprint, diagram, watercolor, risograph).
 
 Args after `--` are ours; everything before is Blender's. CLI flags override the
 SceneSpec's render settings, so the same bundle can be re-rendered in any mode /
@@ -42,7 +44,8 @@ def _parse_args():
                    help="keep verticals vertical (level the camera); off by default")
     p.add_argument("--vector", choices=["svg", "pdf"],
                    help="export the line work as scalable SVG / PDF instead of a "
-                        "raster (needs a line mode: linework/pen/sketch/cel/hatch)")
+                        "raster (needs a line mode, e.g. linework/pen/sketch/"
+                        "cel/hatch/crosshatch)")
     p.add_argument("--open", action="store_true",
                    help="open the result when done (so the launcher needn't wait)")
     return p.parse_args(args)
@@ -150,7 +153,8 @@ def main():
         mode = ns.mode or "linework"
         if mode not in LINE_MODES:
             sys.stderr.write("--vector needs a line mode "
-                             "(linework/pen/sketch/cel/hatch); got --mode %s\n" % mode)
+                             "(linework/pen/sketch/cel/hatch/crosshatch/...); "
+                             "got --mode %s\n" % mode)
             sys.exit(2)
         overrides["mode"] = mode
         vec_out = os.path.splitext(out_path)[0] + "." + ns.vector

@@ -11,6 +11,7 @@ layout:
   - Sketch
   - Cel
   - Hatch
+  - Crosshatch
   - Yellowtrace        # the pen-family paper looks
   - BrownPaper
   - Blueprint

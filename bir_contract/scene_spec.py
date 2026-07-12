@@ -32,6 +32,7 @@ class RenderMode(str, Enum):
     SKETCH = "sketch"         # NPR hand-drawn sketch
     CEL = "cel"               # NPR anime cel shading
     HATCH = "hatch"           # NPR tonal shadow hatching
+    CROSSHATCH = "crosshatch"  # NPR authored TAM stroke hatching (Cycles/OSL)
     YELLOWTRACE = "yellowtrace"  # NPR loose sketch on yellow trace paper
     KRAFT = "kraft"           # NPR black ink + white accents on brown paper
     BLUEPRINT = "blueprint"   # NPR white line work on cyanotype blue
