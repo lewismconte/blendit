@@ -25,7 +25,19 @@ def id_value(eid):
 
 
 def make_element_id(val):
-    return DB.ElementId(val)
+    # Revit 2024+ added ElementId(System.Int64) alongside the ENUM constructors
+    # ElementId(BuiltInParameter) / ElementId(BuiltInCategory). Passing a bare
+    # Python int is then AMBIGUOUS under IronPython - it raises "Multiple targets
+    # could match" - so every doc.GetElement(make_element_id(id)) threw and every
+    # material silently fell back to flat grey (the all-white-render bug). Cast to
+    # an explicit .NET integer so the numeric overload is chosen; fall back to
+    # Int32 for older Revit that lacks the Int64 constructor.
+    try:
+        from System import Int64
+        return DB.ElementId(Int64(val))
+    except Exception:
+        from System import Int32
+        return DB.ElementId(Int32(val))
 
 
 def srgb_to_linear(c):
