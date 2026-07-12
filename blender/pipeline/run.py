@@ -55,9 +55,23 @@ def prepare_scene(loaded, spec):
         add_ground(spec)             # grounds the model; never fatal
     except Exception:
         pass
+    try:
+        from .lights import setup_lights   # artificial fixtures (interiors)
+        setup_lights(spec, scale)    # built before the preset so it can gate them
+    except Exception:
+        pass
 
     mode = str(spec.get("render", {}).get("mode", "realistic"))
     get_preset(mode)(loaded, spec)
+
+    # Gate the artificial lights by mode (lit modes show, drawing/clay hide). One
+    # choke point instead of a call in every preset; the Live master toggle
+    # overrides this default in-session.
+    try:
+        from .lights import set_lights_visible, default_visible_for
+        set_lights_visible(default_visible_for(mode))
+    except Exception:
+        pass
 
     setup_engine(spec)
     return loaded, spec

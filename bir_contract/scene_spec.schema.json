@@ -45,6 +45,7 @@
     "materials": { "type": "array", "items": { "$ref": "#/$defs/material" } },
     "camera": { "$ref": "#/$defs/camera" },
     "sun": { "$ref": "#/$defs/sun" },
+    "lights": { "type": "array", "items": { "$ref": "#/$defs/light" } },
     "world": { "$ref": "#/$defs/world" },
     "render": { "$ref": "#/$defs/render" }
   },
@@ -142,6 +143,24 @@
         "strength": { "type": "number" },
         "angle_degrees": { "type": "number" },
         "color": { "oneOf": [{ "$ref": "#/$defs/rgb" }, { "type": "null" }] }
+      }
+    },
+    "light": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["point", "spot", "area"] },
+        "position": { "$ref": "#/$defs/vec3" },
+        "direction": { "$ref": "#/$defs/vec3" },
+        "intensity": { "type": "number" },
+        "intensity_unit": { "type": "string" },
+        "color_kelvin": { "type": ["number", "null"] },
+        "color": { "oneOf": [{ "$ref": "#/$defs/rgb" }, { "type": "null" }] },
+        "spot_beam_deg": { "type": ["number", "null"] },
+        "spot_field_deg": { "type": ["number", "null"] },
+        "radius_m": { "type": "number" },
+        "on": { "type": "boolean" }
       }
     },
     "world": {

@@ -20,6 +20,7 @@ for p in (_ROOT, _REVIT_LIB):
 from bir_contract.scene_spec import (  # noqa: E402
     SceneSpec, Source, Units, CoordinateSystem, Geometry, Element, Material,
     Camera, Sun, World, RenderSettings, Engine, RenderMode, SkyType, CameraType,
+    Light,
 )
 from bir_contract.transport import MeshData, get_exporter  # noqa: E402
 import bir_transports.gltf.exporter  # noqa: E402,F401  (registers the "gltf" exporter)
@@ -83,6 +84,17 @@ def build_spec():
         sun=Sun(mode="geographic", latitude=51.5074, longitude=-0.1278,
                 date="2026-06-21", time="16:30", timezone=1.0,
                 daylight_saving=True, strength=1.0, angle_degrees=0.526),
+        lights=[
+            # A warm point light inside the box + a cool downlight spot above it -
+            # exercises both lamp types, colour temperature, and the spot cone.
+            Light(id="pt_1", type="point", position=[5.0, 5.0, 5.0],
+                  intensity=1200.0, intensity_unit="cd", color_kelvin=2700.0,
+                  radius_m=0.1),
+            Light(id="sp_1", type="spot", position=[5.0, 5.0, 9.0],
+                  direction=[0.0, 0.0, -1.0], intensity=2000.0,
+                  intensity_unit="cd", color_kelvin=4000.0,
+                  spot_beam_deg=30.0, spot_field_deg=45.0, radius_m=0.05),
+        ],
         world=World(sky_type=SkyType.NISHITA, strength=1.0,
                     ground_albedo=[0.3, 0.3, 0.3]),
         render=RenderSettings(mode=RenderMode.REALISTIC, engine=Engine.CYCLES,

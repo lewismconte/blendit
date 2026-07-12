@@ -52,7 +52,7 @@ def build_scene_spec(doc, view, render_overrides=None, progress=None):
     """-> (spec_dict, meshes). Geometry/materials/camera/sun from the active view
     (3D or a 2D plan / section / elevation). `progress(done, total)` is forwarded to
     the geometry pass for a progress bar."""
-    from bir_extract import geometry, materials, camera, sun, view_export
+    from bir_extract import geometry, materials, camera, sun, view_export, lights
 
     # WYSIWYG first: CustomExporter walks exactly what the view DISPLAYS (host +
     # links, all visibility rules). 3D views only; the collector walk stays as
@@ -65,10 +65,14 @@ def build_scene_spec(doc, view, render_overrides=None, progress=None):
         extracted = None
     if extracted is None:
         extracted = geometry.extract_geometry(doc, view, progress=progress)
-    meshes, elements, material_ids, link_docs = extracted
+    # extract_view returns lights (5-tuple); the collector fallback doesn't (4).
+    light_refs = extracted[4] if len(extracted) > 4 else None
+    meshes, elements, material_ids, link_docs = extracted[0], extracted[1], \
+        extracted[2], extracted[3]
     mats = materials.extract_materials(doc, material_ids, link_docs)
     cam = camera.extract(doc, view)
     sn = sun.extract_sun(doc, view)
+    lg = _extract_lights(doc, view, light_refs, lights)
 
     render = _render(render_overrides)
     asp = cam.get("crop_aspect")            # match the frame to the crop rectangle
@@ -85,6 +89,7 @@ def build_scene_spec(doc, view, render_overrides=None, progress=None):
         "materials": mats,
         "camera": cam,
         "sun": sn,
+        "lights": lg,
         "world": {"sky_type": "nishita", "strength": 1.0,
                   "ground_albedo": [0.3, 0.3, 0.3],
                   # The model brings its own terrain (site link / toposolid):
@@ -93,6 +98,31 @@ def build_scene_spec(doc, view, render_overrides=None, progress=None):
         "render": render,
     }
     return spec, meshes
+
+
+def _extract_lights(doc, view, light_refs, lights):
+    """Resolve OnLight captures to contract lights; fall back to the host
+    collector when the exporter reported none (2D path, or a view whose lights
+    the exporter didn't surface). Never fatal - a lighting failure just yields
+    no lights, never a broken export. A concise log line per light is printed so
+    the real photometric parameter names/units surface on the first live run."""
+    log = []
+    lg = []
+    try:
+        if light_refs:
+            lg = lights.resolve_lights(light_refs, doc, log=log)
+        if not lg:
+            lg = lights.extract_lights_collector(doc, view, log=log)
+    except Exception:
+        lg = []
+    try:
+        if log:
+            print("Blendit: extracted %d light(s):" % len(lg))
+            for line in log:
+                print("  " + line)
+    except Exception:
+        pass
+    return lg
 
 
 def _detect_site(elements):

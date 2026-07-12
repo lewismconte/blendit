@@ -31,6 +31,14 @@ def sun_object():
     return None
 
 
+def set_lights_visible(visible):
+    """Show/hide the extracted artificial-light fixtures (BIR_Lights). Lit modes
+    call this True; drawing / clay modes False (interior lamps would wash out the
+    tone those modes derive from the sun). No-op when the bundle carried none."""
+    from .. import lights
+    lights.set_lights_visible(bool(visible))
+
+
 def set_sun_energy(absolute):
     s = sun_object()
     if s is not None:

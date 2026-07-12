@@ -180,6 +180,29 @@ class Sun:
 
 
 @dataclass
+class Light:
+    """An artificial lighting fixture extracted from Revit (contract 0.3.0).
+
+    Photometrics are carried RAW (intensity + its Revit unit, colour temperature)
+    so the Blender side owns the watts conversion. Position is in SOURCE units
+    (feet) like the camera - the Blender side scales it once on setup. IES
+    photometric webs and true line/area emitter shapes are a later addition; the
+    `intensity_unit` string and optional fields leave room for them."""
+    id: str
+    type: str = "point"               # "point" | "spot" | "area"
+    position: Vec3 = field(default_factory=lambda: [0.0, 0.0, 0.0])    # source units
+    direction: Vec3 = field(default_factory=lambda: [0.0, 0.0, -1.0])  # aim, normalized
+    intensity: float = 0.0            # raw Revit value in `intensity_unit`
+    intensity_unit: str = ""          # "lm" | "cd" | "lx" | "W" | "" (unknown)
+    color_kelvin: Optional[float] = None   # correlated colour temperature
+    color: Optional[RGB] = None       # explicit filter colour (linear), if no CCT
+    spot_beam_deg: Optional[float] = None   # inner (beam) cone - full angle
+    spot_field_deg: Optional[float] = None  # outer (field) cone - full angle
+    radius_m: float = 0.05            # emitter soft size -> shadow softness
+    on: bool = True                   # fixture switched on / non-zero dimming
+
+
+@dataclass
 class World:
     sky_type: SkyType = SkyType.NISHITA
     hdri_uri: Optional[str] = None    # relative path when sky_type == HDRI
@@ -210,6 +233,7 @@ class SceneSpec:
     materials: list = field(default_factory=list)   # list[Material]
     camera: Camera = field(default_factory=Camera)
     sun: Sun = field(default_factory=Sun)
+    lights: list = field(default_factory=list)      # list[Light] (artificial fixtures)
     world: World = field(default_factory=World)
     render: RenderSettings = field(default_factory=RenderSettings)
 

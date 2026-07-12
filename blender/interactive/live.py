@@ -293,6 +293,20 @@ def _update_sun_dir(self, context):
     _apply_sun_direction(self.sun_azimuth, self.sun_altitude)
 
 
+def _update_lights_enabled(self, context):
+    if _SYNCING:
+        return
+    from blender.pipeline import lights
+    lights.set_lights_visible(self.lights_enabled)
+
+
+def _update_lights_strength(self, context):
+    if _SYNCING:
+        return
+    from blender.pipeline import lights
+    lights.set_lights_strength(self.lights_strength)
+
+
 def _update_mode(self, context):
     if _SYNCING:
         return
@@ -660,6 +674,11 @@ def _sync_settings_from_scene():
             import math
             st.sun_strength = s.data.energy
             st.sun_softness = math.degrees(s.data.angle)
+        # Reflect the mode's default light visibility into the toggle (the preset
+        # gating just applied it), so the checkbox never lies after a switch.
+        lcoll = bpy.data.collections.get("BIR_Lights")
+        if lcoll is not None and len(lcoll.objects):
+            st.lights_enabled = not next(iter(lcoll.objects)).hide_render
         from blender.pipeline import npr
         r = npr.get_line_art_radius()
         if r is not None:
@@ -1036,6 +1055,20 @@ class BIR_Settings(bpy.types.PropertyGroup):
         name="Glossiness", default=0.9, min=0.0, max=1.0,
         description="Specular mode surface shine: 1 = mirror, 0 = matte",
         update=_update_gloss)
+    # Artificial lights (Revit fixtures). A master toggle available in EVERY
+    # mode (default follows the mode: on for realistic/specular, off for the
+    # drawing/clay looks) + a global brightness multiplier.
+    lights_enabled: bpy.props.BoolProperty(
+        name="Artificial Lights", default=True,
+        description="Show the light fixtures extracted from Revit (interior "
+                    "lamps, spots). Available in every mode; the drawing and "
+                    "clay looks default it off since interior lamps wash out "
+                    "their sun-driven tone", update=_update_lights_enabled)
+    lights_strength: bpy.props.FloatProperty(
+        name="Lights Strength", default=1.0, min=0.0, max=10.0,
+        description="Global brightness multiplier for all extracted fixtures "
+                    "(the watts conversion is normalized, so dial this to taste)",
+        update=_update_lights_strength)
     # NPR (line / sketch / cel)
     line_thickness: bpy.props.FloatProperty(name="Line Thickness", default=0.05,
                                             min=0.001, max=3.0, precision=3,
@@ -2067,6 +2100,32 @@ class BIR_PT_light(_Sub, bpy.types.Panel):
             layout.prop(st, "gloss", slider=True)
 
 
+class BIR_PT_artificial_lights(_Sub, bpy.types.Panel):
+    """The Revit light fixtures - a master toggle + brightness, available in
+    EVERY mode (only when the bundle actually carried fixtures)."""
+    bl_parent_id = "BIR_PT_main"
+    bl_label = "Artificial Lights"
+    bl_order = 3
+
+    @classmethod
+    def poll(cls, context):
+        st = _bir(context)
+        coll = bpy.data.collections.get("BIR_Lights")
+        return st is not None and coll is not None and len(coll.objects) > 0
+
+    def draw(self, context):
+        st = _bir(context)
+        layout = self.layout
+        coll = bpy.data.collections.get("BIR_Lights")
+        n = len(coll.objects) if coll else 0
+        layout.prop(st, "lights_enabled", toggle=True, icon="LIGHT")
+        sub = layout.column()
+        sub.enabled = st.lights_enabled
+        sub.prop(st, "lights_strength", slider=True)
+        layout.label(text="%d fixture%s from Revit" % (n, "" if n == 1 else "s"),
+                     icon="INFO")
+
+
 class BIR_PT_sun(_Sub, bpy.types.Panel):
     bl_parent_id = "BIR_PT_light"
     bl_label = "Sun"
@@ -2406,8 +2465,8 @@ _CLASSES = (BIR_MaterialItem, BIR_BookmarkItem, BIR_Settings,
             BIR_OT_bookmark_render_all, BIR_OT_contact_sheet,
             BIR_OT_drawing_pose, BIR_OT_export_drawing,
             BIR_PT_main, BIR_PT_views, BIR_PT_materials, BIR_PT_light,
-            BIR_PT_sun, BIR_PT_lines, BIR_PT_lines_adv, BIR_PT_view,
-            BIR_PT_framing, BIR_PT_drawing) + _ATMO_CLASSES
+            BIR_PT_sun, BIR_PT_artificial_lights, BIR_PT_lines, BIR_PT_lines_adv,
+            BIR_PT_view, BIR_PT_framing, BIR_PT_drawing) + _ATMO_CLASSES
 
 
 def _register_ui():

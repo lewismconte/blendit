@@ -30,8 +30,10 @@ def _node_eid(raw, scope):
 
 
 def extract_view(doc, view3d, progress=None):
-    """-> (meshes, elements, material_ids, link_docs) for exactly what the view
-    displays. Raises on failure - the caller falls back to the collector walk."""
+    """-> (meshes, elements, material_ids, link_docs, lights) for exactly what the
+    view displays. Raises on failure - the caller falls back to the collector walk.
+    `lights` is the raw OnLight capture (refs + placement); build_scene_spec
+    resolves photometrics via lights.resolve_lights."""
     ctx = _Context(doc, view3d, progress)
     exporter = DB.CustomExporter(doc, ctx)
     for attr, val in (("IncludeGeometricObjects", False),
@@ -44,7 +46,7 @@ def extract_view(doc, view3d, progress=None):
     if not ctx.meshes:
         raise RuntimeError("CustomExporter produced no geometry")
     _append_rpc_proxies(doc, view3d, ctx)
-    return ctx.meshes, ctx.elements, ctx.material_ids, ctx.link_docs
+    return ctx.meshes, ctx.elements, ctx.material_ids, ctx.link_docs, ctx.lights
 
 
 def _append_rpc_proxies(doc, view3d, ctx):
@@ -148,6 +150,8 @@ class _Context(DB.IExportContext):
         self.link_docs = {}
         self.rpc_elements = []                # (doc, prefix, link_xf, elem_id, scope)
         self._rpc_seen = set()
+        self.lights = []                      # [{doc, scope, eid, pos, dir}] (OnLight)
+        self._light_seen = set()
         self._link_xf = [None]                # LINK-scope transform only (no
         self._view = view3d                   # instance transforms - see OnRPC)
 
@@ -248,7 +252,42 @@ class _Context(DB.IExportContext):
         pass
 
     def OnLight(self, node):
-        pass
+        # WYSIWYG light capture: the exporter only calls this for lights actually
+        # DISPLAYED in the view (visibility already applied). Record the fixture's
+        # world placement + element ref; lights.resolve_lights reads photometrics
+        # from the element afterwards (the RPC-proxy pattern). Never raise - a bad
+        # light must not abort the geometry walk.
+        try:
+            eid = self._elem_ids[-1] if self._elem_ids else None
+            scope = self._scope[-1]
+            key = (scope, _compat.id_value(eid) if eid is not None else id(node))
+            if key in self._light_seen:
+                return
+            self._light_seen.add(key)
+            pos = None
+            aim = None
+            xf = None
+            try:
+                xf = node.GetTransform()      # light's world transform, if exposed
+            except Exception:
+                xf = None
+            if xf is None:
+                xf = self._xf[-1]             # fall back to the instance placement
+            if xf is not None:
+                try:
+                    o = xf.OfPoint(DB.XYZ(0.0, 0.0, 0.0))
+                    pos = (o.X, o.Y, o.Z)
+                except Exception:
+                    pos = None
+                try:
+                    z = xf.OfVector(DB.XYZ(0.0, 0.0, -1.0))   # emit down local -Z
+                    aim = (z.X, z.Y, z.Z)
+                except Exception:
+                    aim = None
+            self.lights.append({"doc": self._docs[-1], "scope": scope,
+                                "eid": eid, "pos": pos, "dir": aim})
+        except Exception:
+            pass
 
     def OnRPC(self, node):
         # RPC content (planting / entourage - the trees) yields NO polymesh

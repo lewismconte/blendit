@@ -55,6 +55,11 @@ locking your work in.
   phases and section boxes stay hidden. Real material **textures** come straight
   from Revit's appearance assets at real-world scale, and a model with its own site
   keeps its terrain (no fake ground plane).
+- 💡 **Real lighting** — the artificial fixtures in your model (downlights, spots,
+  pendants) come across as working Blender lamps with their colour temperature and
+  beam angles, so **interiors actually light up** instead of rendering black. A
+  master toggle + brightness slider in every mode; on by default for the photoreal
+  looks. See [docs/lighting.md](docs/lighting.md).
 - ⚡ **Fast and repeatable** — while you're still in Revit, Blendit prepares the
   scene in the background, so **Open View** typically opens in seconds; the model is
   cached and it's tuned to stay quick even on big, detailed, multi-link models.
