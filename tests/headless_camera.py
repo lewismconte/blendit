@@ -128,7 +128,7 @@ def main():
     print("convert_projection: in-place ORTHO (re-centred) + tilt-shift TWO_POINT OK")
 
     # --- the interactive dropdown drives the REAL camera --------------------------
-    # The reported bug: in Open Model, picking a projection must change the
+    # The reported bug: in Open View, picking a projection must change the
     # capture/render camera, not just the viewport navigation.
     import blender.interactive.live as live
     for cls in live._CLASSES:

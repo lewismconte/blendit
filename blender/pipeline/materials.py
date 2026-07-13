@@ -31,7 +31,7 @@ _TRANSMISSION = "Transmission Weight"
 
 # Per-material surface overrides chosen in the interactive N-panel persist here, next
 # to the bundle, so every path (live re-apply, mode switch, Render Final, headless
-# Render Loaded Model) agrees. {material_id: "auto"|"plain"|"brick"|"wood"|...}.
+# Render View) agrees. {material_id: "auto"|"plain"|"brick"|"wood"|...}.
 OVERRIDES_FILENAME = "material_overrides.json"
 
 

@@ -8,7 +8,7 @@ can render straight away or refine in Open View.
 This is the one slow step (it tessellates the whole view), so it is explicit and
 shows a progress bar - no surprise long operations hidden behind a render button.
 It does NOT open Blender; once loaded, use **Open View** to work it interactively
-or **Render Loaded** to render it headless. Re-run after you change the model.
+or **Render View** to render it headless. Re-run after you change the model.
 """
 __title__ = "Load\nView"
 __author__ = "Blendit"
@@ -34,7 +34,7 @@ def main():
     bundle_ref, blend_path = bir_export.refresh_cache(doc, cfg, _report)
 
     msg = ("- **view loaded.** Now press **Open View** to work it in Blender, or "
-           "**Render Loaded** to render it as-is.\n- cache: `%s`" % bundle_ref)
+           "**Render View** to render it as-is.\n- cache: `%s`" % bundle_ref)
     # Build the fast-open scene cache NOW, in the background - the import +
     # merge is Open View's slow step, so it's usually done before the user is.
     if _launch_cache_build(cfg, bundle_ref, blend_path):

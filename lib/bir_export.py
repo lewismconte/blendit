@@ -1,6 +1,6 @@
 """Shared Revit-side export: active 3D view (or demo) -> glTF bundle.
 
-Used by Load Model (extraction) and by Render Loaded Model / Open Model (which read
+Used by Load View (extraction) and by Render View / Open View (which read
 the cache), so the extraction path is identical. IronPython 2.7 safe. The caller
 passes the active doc (it holds __revit__) and a report(msg) callback for output.
 """
@@ -55,7 +55,7 @@ def extract_or_demo(doc, cfg, report, progress=None, view=None):
 
 def export_bundle(doc, cfg, report, progress=None, out_dir=None, view=None):
     """-> (bundle_ref, out_dir). Extract + write the glTF bundle. `out_dir` lets
-    callers (Load Model) target the model cache instead of the render folder."""
+    callers (Load View) target the model cache instead of the render folder."""
     spec, meshes = extract_or_demo(doc, cfg, report, progress=progress, view=view)
     report("- writing the glTF bundle...")
     if out_dir is None:
@@ -228,7 +228,7 @@ def remove_slot(slot):
 
 
 # --- staleness fingerprint ------------------------------------------------
-# Saved at Load View time so Open View / Render Loaded / the Views list can warn
+# Saved at Load View time so Open View / Render View / the Views list can warn
 # when a cached extraction no longer matches the model ("why is my new wall
 # missing?"). Deliberately cheap and approximate: visible element count + the
 # model file's mtime (+ the view identity for the meta). A soft signal, never a

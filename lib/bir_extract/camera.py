@@ -39,7 +39,7 @@ def extract_camera(view3d):
         "position": [0.0, 0.0, 0.0], "target": [0.0, 1.0, 0.0],
         "up": [0.0, 0.0, 1.0], "fov_degrees": 50.0,
         # Off by default: stay faithful to the Revit view angle. Two-point is an
-        # opt-in correction the user turns on in Open Model / Settings.
+        # opt-in correction the user turns on in Open View / Settings.
         "two_point_perspective": False,
     }
     posed = False

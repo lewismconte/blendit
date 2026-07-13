@@ -162,7 +162,7 @@ def require_loaded(doc):
     else offer the list of other loaded views, else tell the user to Load View
     first and return (None, None).
 
-    Open View / Render Loaded consume a loaded view; loading (the slow Revit
+    Open View / Render View consume a loaded view; loading (the slow Revit
     extraction) is the explicit, clearly-labelled Load View step - nothing else
     surprises the user with a long operation."""
     import bir_export
@@ -300,7 +300,7 @@ def launch_open_view(cfg, report, bundle_ref, blend_path):
     # Force EEVEE for a responsive realtime viewport. --save-blend builds/refreshes
     # the fast-open cache; --blend opens it directly when it already exists.
     # Open in White/Clay (fast, robust for composing) - switch modes live from
-    # the N-panel. The render-mode config drives Render Loaded finals.
+    # the N-panel. The render-mode config drives Render View finals.
     # blender-launcher.exe = no black console window alongside the app.
     cmd = [bir_bootstrap.windowed_blender_exe(blender), "--python", live_py, "--",
            "--bundle", bundle_ref, "--save-blend", blend_path,
@@ -343,8 +343,8 @@ def launch_open_view(cfg, report, bundle_ref, blend_path):
         return False
 
 
-def launch_headless_render(cfg, report, banner="Render Loaded", bundle_ref=None):
-    """The Render Loaded launch, shared with its Shift+Click 'at Final
+def launch_headless_render(cfg, report, banner="Render View", bundle_ref=None):
+    """The Render View launch, shared with its Shift+Click 'at Final
     quality' variant and the Views list: pre-flight Blender, require a loaded
     view (or take an explicit `bundle_ref`), then start a DETACHED headless
     render of the cached bundle with cfg's settings as CLI overrides (the

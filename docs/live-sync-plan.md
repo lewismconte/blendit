@@ -15,7 +15,7 @@
 | Blender finds objects by node id | ✓ **reliable** (spike-confirmed) | Imported object names == spec element nodes **exactly** (`Box_1`, `Glass_1`); node names are unique by construction (category-no-spaces + numeric id [+ `_n`]). Belt-and-suspenders: stamp `obj["node"]` at import. |
 | Apply-loop + transport reusable | ✓ transport; ⚠️ **apply must NOT reuse the glTF importer** | [merge.py](../blender/pipeline/merge.py) proves `bpy.ops.object.join` **silently fails in the session's timer context** (the "white mode" bug) — which is why merge uses bmesh. The glTF importer uses `bpy.ops.import_scene.gltf`; **do not assume it's timer-safe.** |
 | Persistent session on timers | ✓ `bpy.app.timers.register(_deferred_setup, ...)` ([live.py](../blender/interactive/live.py)) | The watcher is one more timer, same pattern. |
-| Spool dir IPC | ✓ natural rendezvous | Open Model launches Blender **detached** (`subprocess.Popen`) with `--bundle <dir>` ([OpenModel](../Blendit.tab/Render.panel/OpenModel.pushbutton/script.py)). Both sides already share that dir → spool patches in `<bundle>/patches/`. No sockets. |
+| Spool dir IPC | ✓ natural rendezvous | Open View launches Blender **detached** (`subprocess.Popen`) with `--bundle <dir>` ([OpenModel](../Blendit.tab/Render.panel/OpenModel.pushbutton/script.py)). Both sides already share that dir → spool patches in `<bundle>/patches/`. No sockets. |
 
 **Spike-proven today (headless):** un-merged `import_bundle` gives one object per element with a clean node→object map; **mesh replace-in-place (`obj.data = m`), object remove, and `from_pydata` add all work via pure data API** — the same class as the bmesh merge that already runs safely in the session context.
 
@@ -61,7 +61,7 @@
   rest is plumbing we already have parts for.*
 - **B1 (Blender) — DONE ✓** (today): un-merged import join + data-API
   replace/remove/add.
-- **B2 (Blender, GUI):** in a running Open Model session, register a
+- **B2 (Blender, GUI):** in a running Open View session, register a
   `bpy.app.timers` poll that applies a **hand-made** patch dropped in the spool;
   confirm it lands live and measure latency. *(Needs the GUI event loop — can't be
   headless; timers don't fire under `--background`.)*

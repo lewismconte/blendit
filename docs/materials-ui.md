@@ -42,7 +42,7 @@ plain string (v1, surface only, still read) or
 "relief": 1.0}`. Builders grow optional `scale`/`relief` parameters; v1
 bundles keep working untouched.
 
-**Mapping audit (Revit side, cheap).** After Load Model, print a small table
+**Mapping audit (Revit side, cheap).** After Load View, print a small table
 in the output window: *Revit material → matched surface* (via
 `material_library.category_for`). Answers "why is my feature wall marble?"
 in one glance, and teaches users the name-matching rules.

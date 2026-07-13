@@ -10,7 +10,7 @@
 
 ## The idea
 
-Today's flow re-extracts the whole active view on **Load Model**. A live link
+Today's flow re-extracts the whole active view on **Load View**. A live link
 instead streams **only what changed**: edit in Revit, see it reflected in the
 running Blender session in ~1–2s, having re-tessellated just the handful of
 elements you touched. Same idea as Enscape / Twinmotion Direct Link — and honestly
@@ -57,7 +57,7 @@ set.
 **2. Extract (Revit, on Idling).** `Application.Idling` fires when Revit is idle and
 gives a valid API read context. Batch-extract the dirty set there. Refactor:
 factor the per-element body of `extract_geometry` into `extract_element(doc, elem,
-opt)`, callable on the whole view (Load Model, today) **or** a dirty id list (patch).
+opt)`, callable on the whole view (Load View, today) **or** a dirty id list (patch).
 
 **3. Transport.** A delta is a small `.glb` with only the changed nodes + a
 `removed: [node ids]` list + (optionally) the camera. **v1 = a spool directory**:
@@ -87,7 +87,7 @@ three buttons, clearly labelled so the user always knows what's listening):
 > drops the subscription. The mode *is* the subscription lifecycle.
 
 The existing Load / Open / Render buttons stay — live sync is an additive mode, not
-a replacement. Open Model launches/attaches the persistent Blender session that
+a replacement. Open View launches/attaches the persistent Blender session that
 Live/Trigger feed.
 
 ## The hard decisions

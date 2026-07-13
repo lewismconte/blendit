@@ -123,7 +123,7 @@ blendit/                         # = the extension root (clone as Blendit.extens
 │   └─ transport.py              # Exporter/Importer interface (IPy2.7 safe)
 ├─ blender/
 │   ├─ headless/render.py        # bpy entry point: argv → import → pipeline → render
-│   ├─ interactive/live.py       # the Open Model session
+│   ├─ interactive/live.py       # the Open View session
 │   ├─ pipeline/                 # import_bundle · materials · world · camera · look · presets/
 │   └─ bir_transports/gltf/importer.py
 ├─ tests/                        # fixture bundle + headless pipeline tests (no Revit)

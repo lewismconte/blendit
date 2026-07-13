@@ -21,7 +21,7 @@ Two extras layer on top of the auto-fit:
     verticals vertical). These are framing controls, not extracted from Revit.
 
 `convert_projection()` changes an existing camera's projection IN PLACE (the
-interactive Open Model "Projection" dropdown: Perspective / Two-Point / Ortho),
+interactive Open View "Projection" dropdown: Perspective / Two-Point / Ortho),
 preserving the user's composition instead of re-running the auto-fit.
 """
 import math
@@ -32,7 +32,7 @@ from bpy_extras.object_utils import world_to_camera_view
 
 DEFAULT_MARGIN = 1.12
 
-# Interactive projection modes (the Open Model "Projection" dropdown).
+# Interactive projection modes (the Open View "Projection" dropdown).
 PERSP = "PERSP"
 TWO_POINT = "TWO_POINT"
 ORTHO = "ORTHO"

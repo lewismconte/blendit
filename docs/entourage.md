@@ -145,7 +145,7 @@ The growth presets generalise into axes every species shares:
 
 ## Blendit integration
 
-- A new **Entourage** section in the Open Model N-panel: species dropdown,
+- A new **Entourage** section in the Open View N-panel: species dropdown,
   `Add one` / `Scatter along selection` / `Reroll`, density + age + season sliders.
 - **Respects the active render mode:** realistic → wire into
   [material_library.py](../blender/pipeline/material_library.py); any NPR mode →

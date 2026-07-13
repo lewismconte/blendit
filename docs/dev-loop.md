@@ -1,7 +1,7 @@
 # Dev loop — how to run it
 
 > **Working end to end** on Blender 5.0: real active-3D-view extraction → `.glb`
-> bundle → Blender pipeline → PNG, plus an interactive Open Model session. The
+> bundle → Blender pipeline → PNG, plus an interactive Open View session. The
 > commands below are the real loop.
 
 ## Revit side (pyRevit)
@@ -11,12 +11,12 @@
    (`git clone <url> Blendit.extension`), then in pyRevit's **Settings → Custom
    Extension Directories** add that folder's **parent**.
 2. **Reload** pyRevit. A `Blendit` tab with a `Render` panel appears
-   (Load Model · Open Model · Render Loaded Model · Mode · Quality · Resolution ·
+   (Load View · Open View · Render View · Mode · Quality · Resolution ·
    Engine · Open Renders · Settings).
-3. Open a model, activate a **3D view**, then **Load Model** (extract it into the
-   cache - the one slow step, with a progress bar). Then **Open Model** to view it
-   in interactive Blender, or **Render Loaded Model** for a headless render as-is.
-   Re-run **Load Model** after you change the model. Open / Render do nothing until
+3. Open a model, activate a **3D view**, then **Load View** (extract it into the
+   cache - the one slow step, with a progress bar). Then **Open View** to view it
+   in interactive Blender, or **Render View** for a headless render as-is.
+   Re-run **Load View** after you change the model. Open / Render do nothing until
    a model is loaded (they tell you to Load first).
 
 ### How the Revit side reaches `bir_contract/`
@@ -92,22 +92,22 @@ projects it through the scene camera into a true vector file:
   pure-Python (no-deps, no-`bpy`) converter — the GP SVG is only straight-segment
   filled paths, which map cleanly to PDF path/fill ops.
 
-Interactive: the Open Model panel shows **Export SVG / PDF** in line modes (snaps
+Interactive: the Open View panel shows **Export SVG / PDF** in line modes (snaps
 the camera to your view first, writes to `<output>/vectors/`). Headless:
 `render.py --vector svg|pdf` (see [README](../README.md)).
 
 Pin the exact CI `bpy` wheel in [README.md](../README.md) once chosen. Verified
 working on Blender 5.0.
 
-## Open Model (interactive)
+## Open View (interactive)
 
-The **Open Model** button launches Blender **not** headless (`blender --python
+The **Open View** button launches Blender **not** headless (`blender --python
 blender/interactive/live.py -- --bundle … --blend … --mode white`), opening the
 loaded model in a stripped "Fly" review session (EEVEE, live Look + per-mode
 sliders, WYSIWYG camera framing, Enter to capture). It opens the prepared `.blend`
 cache when present, so repeat opens skip the re-import. If no model is loaded it
-tells you to **Load Model** first.
+tells you to **Load View** first.
 
 **Still to come (true live link):** a persistent Blender + websocket (pyRevit
-Routes) so Revit edits stream through without re-running **Load Model**. Same
+Routes) so Revit edits stream through without re-running **Load View**. Same
 `Importer`; a new push transport.

@@ -99,7 +99,7 @@ def default_output_dir():
     return d
 
 
-# --- model cache (so Open Model / Render reuse the last Load) ----------------
+# --- model cache (so Open View / Render reuse the last Load) ----------------
 def cache_root():
     """Stable per-user cache for extracted bundles + prepared .blend scenes.
     LOCALAPPDATA (not temp, not the Pictures render folder) so it survives reboots
