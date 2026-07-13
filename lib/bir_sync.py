@@ -5,12 +5,13 @@ DocumentChanged accumulates dirty element ids (no heavy work in the event);
 Idling flushes them. Three modes: "live" (auto-flush on Idling), "trigger"
 (accumulate; flush on Sync Now), "off" (unsubscribed - the default).
 
-R1 SPIKE MODE: PATCH_ENABLED is False, so a flush only LOGS what it would
-have patched (counts + ids) to the pyRevit output and a sync_log.txt next to
-the view's cache. That isolates THE open question - does a pyRevit event
-subscription hold cleanly across edits and rocket-mode engine recycles? -
-from extraction bugs. Once proven, flipping PATCH_ENABLED routes the same
-flush through bir_extract.delta.build_patch + transport.write_patch.
+A flush re-extracts the dirty elements (bir_extract.delta.build_patch) and
+spools a patch (transport.write_patch) that the watching Blender session
+applies in ~a poll tick. Every flush also logs (output window + sync_log.txt
+under the cache root) - that logging WAS the R1 spike (PATCH_ENABLED=False),
+which passed 2026-07-13: clean subscribe, idempotent re-clicks ("already
+subscribed - reused"), exact per-transaction flush counts, clean unsubscribe.
+Set PATCH_ENABLED back to False to return to the log-only diagnostic mode.
 
 ROCKET-MODE DISCIPLINE (the whole reason this module is shaped this way):
 all cross-run state - the mode, the dirty accumulator, and the SUBSCRIBED
@@ -25,7 +26,10 @@ IronPython 2.7 / pure ASCII. Every event-handler body is fully guarded -
 an exception thrown out of a Revit event handler can destabilize Revit.
 """
 
-PATCH_ENABLED = False   # R1 spike: log-only. Flip after the spike holds (E1).
+PATCH_ENABLED = True    # R1 spike PASSED 2026-07-13 (clean subscribe/reuse/
+                        # unsubscribe, exact flush counts - see the plan doc);
+                        # flushes now write real patches. A failed patch build
+                        # logs + falls back to log-only for that flush.
 
 ENV_STATE = "BLENDIT_SYNC_STATE"        # "off" | "live" | "trigger"
 ENV_HANDLERS = "BLENDIT_SYNC_HANDLERS"  # (doc_changed_fn, idling_fn) as attached
