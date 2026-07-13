@@ -14,13 +14,19 @@ subscribed - reused"), exact per-transaction flush counts, clean unsubscribe.
 Set PATCH_ENABLED back to False to return to the log-only diagnostic mode.
 
 ROCKET-MODE DISCIPLINE (the whole reason this module is shaped this way):
-all cross-run state - the mode, the dirty accumulator, and the SUBSCRIBED
-HANDLER DELEGATES - lives in pyRevit envvars (AppDomain-wide, shared across
-engine recycles). A recycled engine re-importing this module gets NEW
-function objects; detaching those from the event would silently leave the
-OLD delegates attached (the classic double-handler leak). So subscribe()
-stores the exact objects it attached, is a no-op while they exist, and
-unsubscribe() detaches the STORED objects.
+all cross-run state - the mode, the dirty accumulator, the subscribed
+handler delegates, and the live GENERATION number - lives in pyRevit
+envvars (AppDomain-wide, shared across engine recycles). Two hard-won
+facts shape the lifecycle:
+  1. A recycled engine re-importing this module gets NEW function objects,
+     so "is anything attached?" must be answered by the envvar, never by
+     module state (else every click stacks another handler).
+  2. IronPython `-=` only removes a delegate from the engine that attached
+     it - across recycles unsubscribe SILENTLY FAILS and old handlers stay
+     attached running OLD code (E1 hit four stacked generations, the oldest
+     eating every flush in log-only mode). Detach is therefore best-effort
+     only; the guarantee is the GENERATION stamp: every handler checks the
+     current generation and goes inert the moment it is superseded.
 
 IronPython 2.7 / pure ASCII. Every event-handler body is fully guarded -
 an exception thrown out of a Revit event handler can destabilize Revit.
@@ -37,7 +43,7 @@ PATCH_ENABLED = True    # R1 spike PASSED 2026-07-13 (clean subscribe/reuse/
 # first attempted against stale log-only handlers exactly this way). A mode
 # click compares the stored revision and silently swaps stale delegates for
 # this engine's fresh ones.
-SYNC_REV = 2
+SYNC_REV = 3
 
 ENV_STATE = "BLENDIT_SYNC_STATE"        # "off" | "live" | "trigger"
 ENV_HANDLERS = "BLENDIT_SYNC_HANDLERS"  # (doc_changed_fn, idling_fn) as attached
@@ -45,6 +51,7 @@ ENV_ACC = "BLENDIT_SYNC_ACC"            # {"dirty": set, "deleted": set, "tx": i
 ENV_OUTPUT = "BLENDIT_SYNC_OUTPUT"      # pyRevit output of the enabling command
 ENV_INDEX = "BLENDIT_SYNC_INDEX"        # {element_id_str: [node, ...]} (E1)
 ENV_SEQ = "BLENDIT_SYNC_SEQ"            # next patch seq int (E1)
+ENV_GEN = "BLENDIT_SYNC_GEN"            # live handler generation (zombie guard)
 
 
 # --- envvar plumbing ---------------------------------------------------------
@@ -119,35 +126,50 @@ def _log_path():
 # --- event handlers -----------------------------------------------------------
 # NOTE: these run inside Revit's event dispatch. Never throw; never do heavy
 # work in DocumentChanged (Idling is the read context for that).
-def _on_doc_changed(sender, args):
-    try:
-        if get_state() == "off":
-            return
-        acc = _acc()
-        from bir_extract import _compat
-        for eid in args.GetAddedElementIds():
-            acc["dirty"].add(_compat.id_value(eid))
-        for eid in args.GetModifiedElementIds():
-            acc["dirty"].add(_compat.id_value(eid))
-        for eid in args.GetDeletedElementIds():
-            v = _compat.id_value(eid)
-            acc["deleted"].add(v)
-            acc["dirty"].discard(v)   # deleted supersedes modified-in-same-tx
-        acc["tx"] = acc.get("tx", 0) + 1
-    except Exception:
-        pass
+#
+# GENERATION STAMPING (the zombie-handler lesson): IronPython event `-=` only
+# removes a delegate from the SAME engine that attached it, so across pyRevit
+# engine recycles unsubscribe silently fails and handlers STACK - the E1 log
+# showed "flush after 4 transaction(s)" for one edit (four generations
+# attached), and the OLDEST zombie drained the accumulator with log-only code
+# before the current handler ever saw it. Correctness therefore must not
+# depend on detach: every attached handler captures the generation it was
+# born with and goes INERT the moment the envvar generation moves past it.
+def _make_handlers(gen):
+    def _doc_changed(sender, args):
+        try:
+            if int(_get(ENV_GEN, 0) or 0) != gen:
+                return   # superseded (a zombie) - inert forever
+            if get_state() == "off":
+                return
+            acc = _acc()
+            from bir_extract import _compat
+            for eid in args.GetAddedElementIds():
+                acc["dirty"].add(_compat.id_value(eid))
+            for eid in args.GetModifiedElementIds():
+                acc["dirty"].add(_compat.id_value(eid))
+            for eid in args.GetDeletedElementIds():
+                v = _compat.id_value(eid)
+                acc["deleted"].add(v)
+                acc["dirty"].discard(v)  # deleted supersedes modified-in-tx
+            acc["tx"] = acc.get("tx", 0) + 1
+        except Exception:
+            pass
 
+    def _idling(sender, args):
+        try:
+            if int(_get(ENV_GEN, 0) or 0) != gen:
+                return   # superseded (a zombie) - inert forever
+            if get_state() != "live":
+                return
+            acc = _get(ENV_ACC)
+            if not acc or not (acc["dirty"] or acc["deleted"]):
+                return
+            _flush(sender)
+        except Exception:
+            pass
 
-def _on_idling(sender, args):
-    try:
-        if get_state() != "live":
-            return
-        acc = _get(ENV_ACC)
-        if not acc or not (acc["dirty"] or acc["deleted"]):
-            return
-        _flush(sender)
-    except Exception:
-        pass
+    return _doc_changed, _idling
 
 
 def _flush(uiapp):
@@ -215,27 +237,33 @@ def _write_patch(uiapp, dirty, deleted):
 
 # --- subscription lifecycle -----------------------------------------------------
 def subscribe(uiapp):
-    """Attach both handlers exactly once. -> True if attached now, False if a
-    CURRENT-revision subscription already existed (idempotent re-click).
-    Stored handlers from an older SYNC_REV are swapped for fresh ones - after
-    a pyRevit reload picks up new code, one mode click heals the subscription
-    instead of silently reusing stale delegates."""
+    """Attach a fresh handler generation exactly once. -> True if attached
+    now, False if a CURRENT-revision subscription already existed (idempotent
+    re-click). Stored handlers from an older SYNC_REV are superseded - after
+    a pyRevit reload picks up new code, one mode click heals the
+    subscription. Detach is BEST-EFFORT ONLY (IronPython `-=` fails silently
+    across engine recycles); correctness comes from the generation bump,
+    which turns every previously attached handler inert."""
     handlers = _get(ENV_HANDLERS)
     if handlers is not None:
         if len(handlers) >= 3 and handlers[2] == SYNC_REV:
             return False
         _log("stored handlers are from an older code revision - resubscribing")
         unsubscribe(uiapp)
-    uiapp.Application.DocumentChanged += _on_doc_changed
-    uiapp.Idling += _on_idling
-    _set(ENV_HANDLERS, (_on_doc_changed, _on_idling, SYNC_REV))
+    gen = int(_get(ENV_GEN, 0) or 0) + 1
+    _set(ENV_GEN, gen)                 # retires every earlier generation NOW
+    doc_h, idle_h = _make_handlers(gen)
+    uiapp.Application.DocumentChanged += doc_h
+    uiapp.Idling += idle_h
+    _set(ENV_HANDLERS, (doc_h, idle_h, SYNC_REV, gen))
     return True
 
 
 def unsubscribe(uiapp):
-    """Detach the STORED delegates (not this engine's re-imports - see module
-    docstring). -> True if something was detached."""
-    handlers = _get(ENV_HANDLERS)
+    """Retire the live generation (the guaranteed kill) and best-effort
+    detach the stored delegates. -> True if a subscription existed."""
+    _set(ENV_GEN, int(_get(ENV_GEN, 0) or 0) + 1)   # zombies go inert even
+    handlers = _get(ENV_HANDLERS)                   # when detach fails below
     if handlers is None:
         return False
     doc_h, idle_h = handlers[0], handlers[1]
@@ -290,11 +318,13 @@ def set_mode(uiapp, mode, report=None):
 def sync_now(uiapp, report=None):
     """Manual flush (the Trigger mode button; also works in Live)."""
     if get_state() == "off":
+        _log("Sync Now clicked while OFF")
         if report:
             report("**Sync is Off** - turn on Live or Trigger Sync first.")
         return
     acc = _get(ENV_ACC)
     if not acc or not (acc["dirty"] or acc["deleted"]):
+        _log("Sync Now: nothing pending")
         if report:
             report("**Nothing to sync** - no model changes since the last flush.")
         return
