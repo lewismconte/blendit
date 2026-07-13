@@ -6,6 +6,22 @@
 > *before* committing to the build. Goal: when the build starts, it runs flawlessly
 > because the hard parts are already proven.
 
+> **BUILD STATUS (2026-07-13, branch `live-sync`):** Phase A is built and
+> headless-green up to the Revit gate. Done: `extract_element` refactor,
+> patch transport + roundtrip test, `sync_apply` + headless test (world-space
+> asserts), `--watch` un-merged session + watcher timer + headless test, the
+> Sync pulldown (Live / Trigger / Sync Now / Off), `lib/bir_sync.py` (engine)
+> and `lib/bir_extract/delta.py` (patch builder). **`bir_sync.PATCH_ENABLED
+> = False`** — the engine is in **R1 spike mode**: flushes only LOG dirty-id
+> counts (output window + `<cache>/_sync/sync_log.txt`).
+>
+> **To run R1 (in Revit):** reload pyRevit → **Sync ▸ Live Sync** → edit a few
+> elements → watch the flush lines appear on idle → click Live Sync AGAIN
+> (must say "already subscribed - reused", not double-log per edit) → **Sync
+> Off** → edit (must log nothing). If that holds across an engine recycle,
+> flip `PATCH_ENABLED = True` and run E1: Open View (it auto-adds `--watch`
+> while sync is on), move a wall, watch it move in Blender.
+
 ## 1. Code audit — what's verified, what the vision doc got slightly wrong
 
 | Claim (live-sync.md) | Reality in the code | Consequence |

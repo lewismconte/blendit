@@ -7,6 +7,7 @@ layout:
   - OpenModel          # open a loaded view in interactive Blender
   - RenderLoadedModel  # headless render a loaded view as-is
   - Views              # the loaded-views list: open / render / reload / remove, with staleness
+  - Sync               # live sync: Live / Trigger / Sync Now / Off (the delta link)
   - "---"
   - Mode               # render mode (16 looks)
   - Quality            # effort preset (engine + samples + denoise)

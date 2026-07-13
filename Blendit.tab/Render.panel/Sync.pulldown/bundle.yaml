@@ -1,0 +1,14 @@
+# Live sync - stream Revit edits into the open Blender session.
+# Off is the default and the safe state; the mode IS the event subscription
+# (see lib/bir_sync.py and docs/live-sync-plan.md).
+tooltip: >
+  Live sync: stream model edits into the open Blender session.
+  Live Sync pushes automatically as Revit goes idle; Trigger Sync accumulates
+  changes until you press Sync Now; Sync Off (the default) stops listening
+  entirely.
+layout:
+  - LiveSync
+  - TriggerSync
+  - SyncNow
+  - "---"
+  - SyncOff
