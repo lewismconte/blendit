@@ -18,18 +18,23 @@ from .presets.registry import get_preset
 from bir_contract.transport import fit_resolution
 
 
-def import_scene(bundle_ref, overrides=None):
+def import_scene(bundle_ref, overrides=None, merge=True):
     """Reset + import geometry only (no look/camera/world/preset). This is the
     state worth caching as a .blend: clean imported geometry, scaled to metres,
     merged by material, before any preset has touched materials. Returns
-    (loaded, spec)."""
+    (loaded, spec).
+
+    merge=False keeps one object per element - the live-sync session shape:
+    deltas join on per-element node identity, which merging destroys. Only the
+    watcher path uses it; everything else wants the merged speedup."""
     reset_scene()
     loaded = import_bundle(bundle_ref)
-    # Collapse the thousands of per-element objects into one-per-material: Line Art
-    # and rendering are object-count-bound, so this is a 5-14x speedup with no
-    # change in look. See merge.py.
-    from .merge import merge_by_material
-    merge_by_material(loaded)
+    if merge:
+        # Collapse the thousands of per-element objects into one-per-material:
+        # Line Art and rendering are object-count-bound, so this is a 5-14x
+        # speedup with no change in look. See merge.py.
+        from .merge import merge_by_material
+        merge_by_material(loaded)
     spec = loaded.spec
     # Where per-material surface overrides (the N-panel Materials list) are read from
     # - a Blender-side runtime annotation, next to the bundle, not a contract field.
