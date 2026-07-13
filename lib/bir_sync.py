@@ -31,6 +31,14 @@ PATCH_ENABLED = True    # R1 spike PASSED 2026-07-13 (clean subscribe/reuse/
                         # flushes now write real patches. A failed patch build
                         # logs + falls back to log-only for that flush.
 
+# Bump this whenever handler/flush behaviour changes. The attached delegates
+# PIN the module version that subscribed them - "already subscribed - reused"
+# would happily keep running year-old code after a pyRevit reload (E1 was
+# first attempted against stale log-only handlers exactly this way). A mode
+# click compares the stored revision and silently swaps stale delegates for
+# this engine's fresh ones.
+SYNC_REV = 2
+
 ENV_STATE = "BLENDIT_SYNC_STATE"        # "off" | "live" | "trigger"
 ENV_HANDLERS = "BLENDIT_SYNC_HANDLERS"  # (doc_changed_fn, idling_fn) as attached
 ENV_ACC = "BLENDIT_SYNC_ACC"            # {"dirty": set, "deleted": set, "tx": int}
@@ -207,13 +215,20 @@ def _write_patch(uiapp, dirty, deleted):
 
 # --- subscription lifecycle -----------------------------------------------------
 def subscribe(uiapp):
-    """Attach both handlers exactly once. -> True if attached now, False if the
-    subscription already existed (idempotent re-click)."""
-    if _get(ENV_HANDLERS) is not None:
-        return False
+    """Attach both handlers exactly once. -> True if attached now, False if a
+    CURRENT-revision subscription already existed (idempotent re-click).
+    Stored handlers from an older SYNC_REV are swapped for fresh ones - after
+    a pyRevit reload picks up new code, one mode click heals the subscription
+    instead of silently reusing stale delegates."""
+    handlers = _get(ENV_HANDLERS)
+    if handlers is not None:
+        if len(handlers) >= 3 and handlers[2] == SYNC_REV:
+            return False
+        _log("stored handlers are from an older code revision - resubscribing")
+        unsubscribe(uiapp)
     uiapp.Application.DocumentChanged += _on_doc_changed
     uiapp.Idling += _on_idling
-    _set(ENV_HANDLERS, (_on_doc_changed, _on_idling))
+    _set(ENV_HANDLERS, (_on_doc_changed, _on_idling, SYNC_REV))
     return True
 
 
@@ -223,7 +238,7 @@ def unsubscribe(uiapp):
     handlers = _get(ENV_HANDLERS)
     if handlers is None:
         return False
-    doc_h, idle_h = handlers
+    doc_h, idle_h = handlers[0], handlers[1]
     try:
         uiapp.Application.DocumentChanged -= doc_h
     except Exception:
