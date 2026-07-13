@@ -17,6 +17,21 @@ DB = _compat.DB
 _DEFAULT_MAT = "mat_default"
 
 
+def view_options(view3d):
+    """Geometry Options for extracting WYSIWYG from a view. Shared by the full
+    extract_geometry sweep and the live-sync delta path (bir_extract/delta.py)."""
+    opt = DB.Options()
+    # Prefer the view's own representation (respects detail level + visibility);
+    # fall back to a Fine model representation if setting the view is rejected.
+    try:
+        opt.View = view3d
+    except Exception:
+        opt.DetailLevel = DB.ViewDetailLevel.Fine
+    opt.ComputeReferences = False
+    opt.IncludeNonVisibleObjects = False
+    return opt
+
+
 def extract_geometry(doc, view3d, progress=None):
     """-> (meshes, elements, material_ids, link_docs). `progress(done, total)`
     is called periodically so the Revit side can show a progress bar.
@@ -28,15 +43,7 @@ def extract_geometry(doc, view3d, progress=None):
     silently picks whatever host material happens to share the integer id. So
     link materials are keyed "mat_l<instance-id>_<mat-id>" and materials.py
     resolves them against the right document."""
-    opt = DB.Options()
-    # Prefer the view's own representation (respects detail level + visibility);
-    # fall back to a Fine model representation if setting the view is rejected.
-    try:
-        opt.View = view3d
-    except Exception:
-        opt.DetailLevel = DB.ViewDetailLevel.Fine
-    opt.ComputeReferences = False
-    opt.IncludeNonVisibleObjects = False
+    opt = view_options(view3d)
 
     collector = (DB.FilteredElementCollector(doc, view3d.Id)
                  .WhereElementIsNotElementType())
@@ -66,38 +73,57 @@ def extract_geometry(doc, view3d, progress=None):
         except Exception:
             pass
 
-        try:
-            geo = elem.get_Geometry(opt)
-        except Exception:
-            geo = None
-        if geo is None:
-            continue
-
-        groups = {}
-        try:
-            _collect(geo, groups)
-        except Exception:
-            groups = {}
-        if not groups:
-            continue
-
-        cat = _category_name(elem)
-        eid = str(_compat.id_value(elem.Id))
-        level = _level_name(doc, elem)
-        single = len(groups) == 1
-        n = 0
-        for mat_key, data in groups.items():
-            if not data["tris"]:
-                continue
-            node = "%s_%s" % (cat, eid) if single else "%s_%s_%d" % (cat, eid, n)
-            n += 1
-            meshes.append(MeshData(node, data["verts"], data["tris"],
-                                   material_id=mat_key))
-            elements.append({"node": node, "element_id": eid, "category": cat,
-                             "level": level, "material_id": mat_key})
-            material_ids.add(mat_key)
+        m, e, mids = extract_element(doc, elem, opt)
+        meshes.extend(m)
+        elements.extend(e)
+        material_ids.update(mids)
 
     return meshes, elements, material_ids, link_docs
+
+
+def extract_element(doc, elem, opt, prefix="mat_", xf=None, eid=None):
+    """Tessellate ONE element -> (meshes, elements, material_ids).
+
+    The per-element body shared by the full extract_geometry sweep and the
+    live-sync delta path: a dirty element re-extracts through the exact same
+    code, so a patch's nodes are byte-identical to what a full Load View would
+    have produced. `prefix`/`xf`/`eid` carry the link-instance namespacing
+    (see _extract_link); host elements use the defaults."""
+    try:
+        geo = elem.get_Geometry(opt)
+    except Exception:
+        geo = None
+    if geo is None:
+        return [], [], set()
+
+    groups = {}
+    try:
+        _collect(geo, groups, prefix, xf)
+    except Exception:
+        groups = {}
+    if not groups:
+        return [], [], set()
+
+    cat = _category_name(elem)
+    if eid is None:
+        eid = str(_compat.id_value(elem.Id))
+    level = _level_name(doc, elem)
+    meshes = []
+    elements = []
+    material_ids = set()
+    single = len(groups) == 1
+    n = 0
+    for mat_key, data in groups.items():
+        if not data["tris"]:
+            continue
+        node = "%s_%s" % (cat, eid) if single else "%s_%s_%d" % (cat, eid, n)
+        n += 1
+        meshes.append(MeshData(node, data["verts"], data["tris"],
+                               material_id=mat_key))
+        elements.append({"node": node, "element_id": eid, "category": cat,
+                         "level": level, "material_id": mat_key})
+        material_ids.add(mat_key)
+    return meshes, elements, material_ids
 
 
 def _extract_link(view3d, link, meshes, elements, material_ids, link_docs,
@@ -149,34 +175,12 @@ def _extract_link(view3d, link, meshes, elements, material_ids, link_docs,
                 progress(lidx + 1, ltotal)
             except Exception:
                 pass
-        try:
-            geo = le.get_Geometry(opt)
-        except Exception:
-            geo = None
-        if geo is None:
-            continue
-        groups = {}
-        try:
-            _collect(geo, groups, prefix, xf)
-        except Exception:
-            groups = {}
-        if not groups:
-            continue
-        cat = _category_name(le)
-        eid = "l%s_%s" % (lid, _compat.id_value(le.Id))
-        level = _level_name(ldoc, le)
-        single = len(groups) == 1
-        n = 0
-        for mat_key, data in groups.items():
-            if not data["tris"]:
-                continue
-            node = "%s_%s" % (cat, eid) if single else "%s_%s_%d" % (cat, eid, n)
-            n += 1
-            meshes.append(MeshData(node, data["verts"], data["tris"],
-                                   material_id=mat_key))
-            elements.append({"node": node, "element_id": eid, "category": cat,
-                             "level": level, "material_id": mat_key})
-            material_ids.add(mat_key)
+        m, e, mids = extract_element(
+            ldoc, le, opt, prefix=prefix, xf=xf,
+            eid="l%s_%s" % (lid, _compat.id_value(le.Id)))
+        meshes.extend(m)
+        elements.extend(e)
+        material_ids.update(mids)
 
 
 def _collect(geo, groups, prefix="mat_", xf=None):
