@@ -43,12 +43,11 @@ PATCH_ENABLED = True    # R1 spike PASSED 2026-07-13 (clean subscribe/reuse/
 # first attempted against stale log-only handlers exactly this way). A mode
 # click compares the stored revision and silently swaps stale delegates for
 # this engine's fresh ones.
-SYNC_REV = 3
+SYNC_REV = 4
 
 ENV_STATE = "BLENDIT_SYNC_STATE"        # "off" | "live" | "trigger"
 ENV_HANDLERS = "BLENDIT_SYNC_HANDLERS"  # (doc_changed_fn, idling_fn) as attached
 ENV_ACC = "BLENDIT_SYNC_ACC"            # {"dirty": set, "deleted": set, "tx": int}
-ENV_OUTPUT = "BLENDIT_SYNC_OUTPUT"      # pyRevit output of the enabling command
 ENV_INDEX = "BLENDIT_SYNC_INDEX"        # {element_id_str: [node, ...]} (E1)
 ENV_SEQ = "BLENDIT_SYNC_SEQ"            # next patch seq int (E1)
 ENV_GEN = "BLENDIT_SYNC_GEN"            # live handler generation (zombie guard)
@@ -85,17 +84,16 @@ def _acc():
     return acc
 
 
-# --- logging (spike evidence must survive a closed output window) ------------
+# --- logging ------------------------------------------------------------------
+# FILE + stdout ONLY - never the pyRevit output window. Printing to a stored
+# output window RE-SHOWS it, so every Live-mode flush popped a window over
+# Revit (the house rule: success feedback is passive; windows appear only for
+# a click that asked for one). The diagnostic trail lives in sync_log.txt;
+# button clicks report through their own command output via `report`; a
+# FAILED patch raises a passive toast (_toast) so drift never goes unnoticed.
 def _log(msg):
-    line = "Blendit sync: %s" % msg
-    out = _get(ENV_OUTPUT)
-    if out is not None:
-        try:
-            out.print_md(line)
-        except Exception:
-            pass
     try:
-        print(line)
+        print("Blendit sync: %s" % msg)
     except Exception:
         pass
     try:
@@ -107,6 +105,14 @@ def _log(msg):
                 f.write("%s  %s\n" % (datetime.datetime.now().isoformat(), msg))
             finally:
                 f.close()
+    except Exception:
+        pass
+
+
+def _toast(msg):
+    try:
+        import bir_ui
+        bir_ui.toast(msg)
     except Exception:
         pass
 
@@ -197,6 +203,10 @@ def _flush(uiapp):
         _write_patch(uiapp, dirty, deleted)
     except Exception as exc:
         _log("PATCH FAILED (%s) - falling back to log-only for this flush" % exc)
+        # Passive heads-up (auto-dismisses): the Blender view just drifted out
+        # of sync and a silent file log is the only other trace.
+        _toast("Blendit sync: a change failed to sync - the Blender view "
+               "may be out of date (details in sync_log.txt)")
 
 
 def _write_patch(uiapp, dirty, deleted):
@@ -282,12 +292,6 @@ def unsubscribe(uiapp):
 def set_mode(uiapp, mode, report=None):
     """The ribbon entry point: 'live' / 'trigger' / 'off'."""
     mode = str(mode)
-    try:
-        from pyrevit import script
-        _set(ENV_OUTPUT, script.get_output())
-    except Exception:
-        pass
-
     if mode == "off":
         detached = unsubscribe(uiapp)
         _set(ENV_STATE, "off")
