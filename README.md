@@ -59,7 +59,8 @@ locking your work in.
   pendants) come across as working Blender lamps with their colour temperature and
   beam angles, so **interiors actually light up** instead of rendering black. A
   master toggle + brightness slider in every mode; on by default for the photoreal
-  looks. See [docs/lighting.md](docs/lighting.md).
+  looks. In **Crosshatch** they shape the hatch itself — switch them on and the
+  strokes lighten where the lamps pool. See [docs/lighting.md](docs/lighting.md).
 - ⚡ **Fast and repeatable** — while you're still in Revit, Blendit prepares the
   scene in the background, so **Open View** typically opens in seconds; the model is
   cached and it's tuned to stay quick even on big, detailed, multi-link models.
@@ -124,7 +125,7 @@ From the **Blendit** ribbon:
 3. Then either:
    - **Open View** — opens it in Blender to fly around, compose, tweak the look, pose
      2D plans / elevations / sections, and capture your shot, or
-   - **Render Loaded** — renders it straight to an image, no fuss.
+   - **Render View** — renders it straight to an image, no fuss.
 4. **Views** — every loaded view in one list (marked when the model has changed
    since Load): open, render, reload or remove any of them from there.
 5. **Open Renders** to find your images.
