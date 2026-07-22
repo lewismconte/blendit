@@ -49,6 +49,10 @@ locking your work in.
 - 🛬 **Compose your shot** — an interactive review session where you fly around, frame
   the view, straighten your verticals (two-point) or switch to orthographic, tweak the
   light, and snap a capture — all without touching Revit again.
+- 🔄 **Live sync** — keep the review session open and **keep designing in Revit**: move
+  a wall, swap a material, delete a family, and Blender **updates in place in real
+  time**, streaming only what changed. No re-export, no reload — the shot you're
+  composing tracks the model as you work. Turn it on from the **Sync** ribbon button.
 - 🔗 **What you see is what you get** — the render matches your Revit view: **linked
   models come through complete** (with their own materials), trees and entourage
   included, and the view's visibility is respected — hidden elements, categories,
@@ -126,9 +130,12 @@ From the **Blendit** ribbon:
    - **Open View** — opens it in Blender to fly around, compose, tweak the look, pose
      2D plans / elevations / sections, and capture your shot, or
    - **Render View** — renders it straight to an image, no fuss.
-4. **Views** — every loaded view in one list (marked when the model has changed
+4. **Sync** *(optional)* — with a view open in Blender, turn on **Live Sync** and keep
+   editing in Revit; your changes stream into the open Blender view as you make them.
+   (Or use **Trigger Sync** to push changes only when you click **Sync Now**.)
+5. **Views** — every loaded view in one list (marked when the model has changed
    since Load): open, render, reload or remove any of them from there.
-5. **Open Renders** to find your images.
+6. **Open Renders** to find your images.
 
 **Settings** lets you set the Blender path, output folder, default render look, and
 quality. That's the whole workflow.
@@ -141,8 +148,6 @@ export it as a PNG, or as SVG / PDF in any of the line looks.
 
 Blendit works today, and it's built to grow. On the roadmap:
 
-- 🔴 **Live sync** — edit in Revit and watch the Blender view update in real time,
-  streaming only what changed.
 - 🌳 **Entourage & assets** — a library of procedural trees, people and cars you can
   scatter into a scene (and round-trip back to Revit as lightweight placeholders).
 - 🧱 **Richer materials** — real Revit textures ship today; next up: roughness /
@@ -188,8 +193,10 @@ everything else is built on top of it.
 - **The data contract:** [docs/contract.md](docs/contract.md) · **dev loop:**
   [docs/dev-loop.md](docs/dev-loop.md)
 - **Hatch & Crosshatch design note:** [hatch TAMs](docs/hatch-tam.md)
-- **Parked designs:** [live-sync](docs/live-sync.md) ·
-  [live-sync build plan](docs/live-sync-plan.md) · [entourage](docs/entourage.md)
+- **Live sync design & build notes:** [live-sync](docs/live-sync.md) ·
+  [build plan](docs/live-sync-plan.md)
+- **Parked designs:** [entourage](docs/entourage.md) ·
+  [platform strategy](docs/platform-strategy.md)
 
 The tests run **headless under `bpy` — no Revit required**. Render the bundled fixture
 without any of Revit:
