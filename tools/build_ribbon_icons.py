@@ -203,11 +203,24 @@ def about_info():
     return g.out()
 
 
+def sync_cycle():
+    """Live sync: two arrows chasing around a circle (the delta link)."""
+    g = G()
+    # two arcs of one ring (PIL angles: 0 = 3 o'clock, clockwise, y-down)
+    g.arc(26, 26, 70, 70, 180, 315, BLUE, W)        # top arc, 9:00 -> 1:30
+    g.arc(26, 26, 70, 70, 0, 135, BLUE, W)          # bottom arc, 3:00 -> 7:30
+    # arrowheads continue each arc's clockwise travel - orange accent
+    g.arrowhead((64.4, 32.4), 45, 13, ORANGE)       # tip of the top arc
+    g.arrowhead((31.6, 63.6), -135, 13, ORANGE)     # tip of the bottom arc
+    return g.out()
+
+
 ICONS = [
     ("LoadModel.pushbutton", load_view),
     ("OpenModel.pushbutton", open_view),
     ("RenderLoadedModel.pushbutton", render_view),
     ("Views.pushbutton", views_list),
+    ("Sync.pulldown", sync_cycle),
     ("Mode.pulldown", mode_looks),
     ("Quality.pushbutton", quality_gauge),
     ("Resolution.pushbutton", resolution_size),

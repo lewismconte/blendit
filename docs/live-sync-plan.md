@@ -6,6 +6,26 @@
 > *before* committing to the build. Goal: when the build starts, it runs flawlessly
 > because the hard parts are already proven.
 
+> **BUILD STATUS (2026-07-13, branch `live-sync`):** Phase A is built and
+> headless-green: `extract_element` refactor, patch transport + roundtrip
+> test, `sync_apply` + headless test (world-space asserts), `--watch`
+> un-merged session + watcher timer + headless test, the Sync pulldown
+> (Live / Trigger / Sync Now / Off), `lib/bir_sync.py` (engine) and
+> `lib/bir_extract/delta.py` (patch builder).
+>
+> **R1 PASSED (2026-07-13, real Revit session):** clean subscribe, three
+> idempotent re-clicks all "already subscribed - reused" with no double
+> logging, exact per-transaction flush counts, Trigger-mode accumulation
+> flushing as one batch, clean unsubscribe with silence after
+> (`<cache>/_sync/sync_log.txt` holds the evidence). **`PATCH_ENABLED` is
+> now True** — flushes write real patches.
+>
+> **E1 (the thin slice, next Revit session):** Sync ▸ Live Sync → Open View
+> (auto-adds `--watch`: un-merged fresh import, cache skipped) → move a wall
+> → it should move in Blender in ~1–2s (Idling flush + 0.5s poll). Recovery
+> for anything odd: Sync Off + a normal Load View. Iterate extraction edge
+> cases from real tracebacks (the established pattern).
+
 ## 1. Code audit — what's verified, what the vision doc got slightly wrong
 
 | Claim (live-sync.md) | Reality in the code | Consequence |

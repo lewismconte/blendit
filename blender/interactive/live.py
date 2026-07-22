@@ -94,8 +94,12 @@ def _parse_args():
     p.add_argument("--mode",
                    choices=["realistic", "white", "shadow", "specular",
                             "linework", "pen", "sketch", "cel", "hatch",
-                            "yellowtrace", "kraft", "blueprint",
+                            "crosshatch", "yellowtrace", "kraft", "blueprint",
                             "diagram", "watercolor", "risograph"])
+    # Live sync: watch <bundle>/patches and apply Revit deltas as they land.
+    # Forces an UN-MERGED fresh import (per-element identity is what deltas
+    # join on), so the cached merged .blend is neither opened nor written.
+    p.add_argument("--watch", action="store_true")
     return p.parse_args(args)
 
 
@@ -3143,7 +3147,13 @@ def _build_steps():
     from blender.pipeline.run import import_scene, prepare_scene, _apply_overrides
     from blender.pipeline import cache as bir_cache
 
-    if ns.blend and os.path.isfile(ns.blend):
+    watch = bool(getattr(ns, "watch", False))
+    if watch and ns.blend and os.path.isfile(ns.blend):
+        # The cache holds a MERGED scene; deltas need per-element identity. A
+        # fresh un-merged import is the price of the live link this session.
+        print("Blendit: live sync needs an un-merged scene - "
+              "ignoring the cached .blend for this session")
+    if ns.blend and os.path.isfile(ns.blend) and not watch:
         # FAST PATH: open the cached prepared scene (no re-import).
         yield "Opening cached scene"
         print("Blendit: opening cached scene (%s)" % ns.blend)
@@ -3170,8 +3180,11 @@ def _build_steps():
             yield "Importing geometry (%s elements)" % "{:,}".format(n_elements)
         else:
             yield "Importing geometry"
-        _LOADED, _SPEC = import_scene(ns.bundle, overrides=overrides or None)
-        if ns.save_blend:
+        _LOADED, _SPEC = import_scene(ns.bundle, overrides=overrides or None,
+                                      merge=not watch)
+        if ns.save_blend and not watch:
+            # (watch: never write the un-merged scene over the merged cache -
+            # it would poison every future fast open.)
             yield "Caching scene for fast reopen"
             try:
                 bir_cache.save_clean_blend(ns.save_blend)
@@ -3194,6 +3207,40 @@ def _build_steps():
     _init_materials()                        # build the Materials list + apply saved overrides
     _load_bookmarks()                        # saved views from the sidecar JSON
     _register_hud()                          # ensure the HUD survived open_mainfile
+
+    if watch:
+        yield "Starting live sync watcher"
+        _start_watch(ns)
+
+
+def _start_watch(ns):
+    """Wire + arm the live-sync watcher on this session's spool. The session is
+    un-merged (per-element objects) by the time this runs."""
+    from bir_contract import transport as _tp
+    from blender.interactive import sync_apply
+    spool = _tp.patch_dir_of(ns.bundle, create=True)
+    n = _tp.clear_patches(spool)   # anything spooled pre-session is stale: the
+    if n:                          # full bundle we just imported supersedes it
+        print("Blendit: cleared %d stale patch(es)" % n)
+    # Stamp the node id on every imported object so the applier can still find
+    # it if the user renames things in the outliner.
+    for node, obj in (_LOADED.node_to_object or {}).items():
+        try:
+            obj["node"] = node
+        except Exception:
+            pass
+    sync_apply.configure(spec=_SPEC, spool=spool,
+                         collection=_LOADED.root_collection)
+    # persistent=True: the poll must survive any file load, same reasoning as
+    # the build timer in main().
+    try:
+        bpy.app.timers.register(sync_apply.poll,
+                                first_interval=sync_apply.POLL_INTERVAL,
+                                persistent=True)
+    except Exception as ex:
+        print("Blendit: could not start the sync watcher (%s)" % ex)
+        return
+    print("Blendit: live sync watching %s" % spool)
 
 
 _BUILD_GEN = None

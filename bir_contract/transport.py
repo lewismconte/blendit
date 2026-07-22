@@ -184,6 +184,121 @@ def check_contract_version(spec_dict):
               % (got, CONTRACT_VERSION))
 
 
+# --- live-sync patches (transport-level, NOT a SceneSpec concept) -------------
+# A patch is a tiny delta bundle: the re-extracted meshes of the elements that
+# changed since the last flush, plus the node ids that vanished. It rides the
+# shared bundle dir as a spool ( <bundle>/patches/patch_<seq>.json ), written by
+# the Revit sync engine and consumed in seq order by the Blender session's poll
+# timer. Raw-mesh JSON (Revit feet, Z-up) - no glTF round-trip: the applier
+# builds meshes with from_pydata, so deltas skip the Y-up intermediate entirely.
+# The SceneSpec contract does not change; this envelope is the whole protocol.
+PATCH_DIR = "patches"
+PATCH_KIND = "blendit_patch"
+_PATCH_PREFIX = "patch_"
+
+
+def patch_dir_of(bundle_ref, create=False):
+    # (str, bool) -> str ; the spool dir for a bundle
+    d = os.path.join(bundle_dir_of(bundle_ref), PATCH_DIR)
+    if create and not os.path.isdir(d):
+        os.makedirs(d)
+    return d
+
+
+def patch_seq_of(path):
+    # (str) -> int | None ; parse the sequence number out of a patch filename
+    name = os.path.basename(path)
+    if not (name.startswith(_PATCH_PREFIX) and name.endswith(".json")):
+        return None
+    try:
+        return int(name[len(_PATCH_PREFIX):-len(".json")])
+    except Exception:
+        return None
+
+
+def list_patches(spool):
+    # (str) -> list[str] ; pending patch paths in seq order (numeric, not lexical)
+    if not os.path.isdir(spool):
+        return []
+    out = []
+    for name in os.listdir(spool):
+        p = os.path.join(spool, name)
+        seq = patch_seq_of(p)
+        if seq is not None:
+            out.append((seq, p))
+    out.sort()
+    return [p for _, p in out]
+
+
+def next_patch_seq(spool):
+    # (str) -> int ; 1 + the highest seq on disk (1-based when empty)
+    top = 0
+    for p in list_patches(spool):
+        seq = patch_seq_of(p)
+        if seq is not None and seq > top:
+            top = seq
+    return top + 1
+
+
+def write_patch(spool, seq, meshes, removed, camera=None):
+    # (str, int, list[MeshData|dict], list[str], dict|None) -> str (patch path)
+    # ATOMIC: written to a .tmp then renamed, so the poller can never read a
+    # half-written file (it only picks up names matching patch_*.json).
+    if not os.path.isdir(spool):
+        os.makedirs(spool)
+    updated = []
+    for m in meshes:
+        if isinstance(m, dict):
+            updated.append({"node": m.get("node"),
+                            "vertices": m.get("vertices"),
+                            "faces": m.get("faces"),
+                            "material_id": m.get("material_id")})
+        else:
+            updated.append({"node": m.node,
+                            "vertices": [list(v) for v in m.vertices],
+                            "faces": [list(f) for f in m.faces],
+                            "material_id": m.material_id})
+    envelope = {
+        "kind": PATCH_KIND,
+        "contract_version": CONTRACT_VERSION,
+        "seq": int(seq),
+        "created": datetime.datetime.now().isoformat(),
+        "updated": updated,
+        "removed": list(removed or []),
+        "camera": camera,
+    }
+    path = os.path.join(spool, "%s%06d.json" % (_PATCH_PREFIX, int(seq)))
+    tmp = path + ".tmp"
+    write_json(tmp, envelope)
+    os.rename(tmp, path)
+    return path
+
+
+def read_patch(path):
+    # (str) -> dict ; the envelope written by write_patch
+    env = read_json(path)
+    if env.get("kind") != PATCH_KIND:
+        raise ValueError("not a Blendit patch: %s" % path)
+    return env
+
+
+def clear_patches(spool):
+    # (str) -> int ; drop every pending patch (+ stray .tmp) - session startup
+    # begins from the full bundle, so anything spooled before it is stale.
+    n = 0
+    if not os.path.isdir(spool):
+        return n
+    for name in os.listdir(spool):
+        if name.startswith(_PATCH_PREFIX) and (name.endswith(".json")
+                                               or name.endswith(".json.tmp")):
+            try:
+                os.remove(os.path.join(spool, name))
+                n += 1
+            except Exception:
+                pass
+    return n
+
+
 # --- registry: select transport by name (== SceneSpec.geometry.transport) ---
 _EXPORTERS = {}
 _IMPORTERS = {}

@@ -306,6 +306,17 @@ def launch_open_view(cfg, report, bundle_ref, blend_path):
            "--bundle", bundle_ref, "--save-blend", blend_path,
            "--capture-dir", cap_dir,
            "--engine", "EEVEE", "--mode", "white"]
+    # Live/Trigger sync on -> the session must watch the patch spool. --watch
+    # forces an un-merged fresh import (per-element deltas), so the session
+    # skips the merged .blend cache both ways for this launch.
+    try:
+        import bir_sync
+        if bir_sync.get_state() != "off":
+            cmd.append("--watch")
+            report("**Live sync** - opening un-merged so Revit edits can "
+                   "stream in (a fresh import; the fast cache is skipped).")
+    except Exception:
+        pass
     import bir_export
     state = bir_export.cache_state(blend_path)
     if state == "building":

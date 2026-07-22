@@ -71,6 +71,9 @@ def build_material(rec, engine="CYCLES", surface="auto", base_dir=None):
     other value forces that specific library surface (the N-panel override).
     `base_dir` is the bundle dir map uris resolve against."""
     mat = bpy.data.materials.new(rec.get("name") or rec.get("id") or "RevitMaterial")
+    # The contract material id, queryable after the by-id build dict is gone -
+    # the live-sync applier assigns materials to patched-in objects by this.
+    mat["bir_material_id"] = rec.get("id") or ""
     mat.use_nodes = True
     nt = mat.node_tree
     nt.nodes.clear()
