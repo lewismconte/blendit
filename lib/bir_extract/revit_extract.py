@@ -7,6 +7,7 @@ cleanly outside Revit; the RevitAPI is only touched when the functions are
 actually called with a live doc.
 """
 import datetime
+import math
 
 from bir_contract.transport import CONTRACT_VERSION, fit_resolution
 from bir_extract import _compat
@@ -84,7 +85,7 @@ def build_scene_spec(doc, view, render_overrides=None, progress=None):
         "source": _source(doc, view),
         "units": {"source_unit": "feet", "scale_to_meters": 0.3048, "up_axis": "Z"},
         "coordinate_system": {"project_base_point": _base_point(doc),
-                              "true_north_degrees": 0.0},
+                              "true_north_degrees": _true_north_degrees(doc)},
         "geometry": {"transport": "gltf", "uri": "scene.glb", "elements": elements},
         "materials": mats,
         "camera": cam,
@@ -167,6 +168,56 @@ def _base_point(doc):
         return [p.X, p.Y, p.Z]
     except Exception:
         return [0.0, 0.0, 0.0]
+
+
+def true_north_from_project_angle(angle_radians):
+    """Revit's project->survey rotation -> the contract's true_north_degrees.
+
+    THE SIGN IS THE WHOLE POINT, so it lives in its own pure function with a
+    worked example, because getting it backwards does not halve the error - it
+    doubles it, and a doubled 98 deg site reads as "the model is 180 out".
+
+    ProjectPosition.Angle is the rotation that carries PROJECT coordinates into
+    SURVEY (true north) coordinates, counter-clockwise. Rotating the project's
+    +Y by it lands at bearing -Angle in the true frame, so project north sits
+    Angle counter-clockwise of true north, which is the same as saying true
+    north sits Angle CLOCKWISE of project north. The contract wants the angle
+    counter-clockwise from +Y. Hence the negation.
+
+    >>> round(true_north_from_project_angle(math.radians(-98.04)), 2)
+    98.04
+    """
+    return -math.degrees(angle_radians)
+
+
+def _true_north_degrees(doc):
+    """True north, measured counter-clockwise from the model's +Y. -> degrees.
+
+    This number is why a correctly exported model can still put its shadows in
+    the wrong place. Revit's geometry lives in PROJECT north coordinates (+Y),
+    but every sun angle - Revit's own, and the astronomical one the Blender
+    side computes from lat/long - is measured from TRUE north. Export one into
+    the other without this rotation and the sun is out by exactly this angle,
+    silently, in every project whose north is not zero.
+
+    Read from the active project location, falling back to the project base
+    point's own "Angle to True North" parameter, which is what Autodesk's own
+    sun-direction sample uses. Both are converted through
+    true_north_from_project_angle, which owns the sign.
+    """
+    try:
+        position = doc.ActiveProjectLocation.GetProjectPosition(DB.XYZ.Zero)
+        return true_north_from_project_angle(position.Angle)
+    except Exception:
+        pass
+    try:
+        bp = DB.BasePoint.GetProjectBasePoint(doc)
+        p = bp.get_Parameter(DB.BuiltInParameter.BASEPOINT_ANGLETON_PARAM)
+        if p is not None:
+            return true_north_from_project_angle(p.AsDouble())
+    except Exception:
+        pass
+    return 0.0
 
 
 def _safe(fn, default):

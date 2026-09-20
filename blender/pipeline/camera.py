@@ -52,6 +52,58 @@ DRAWING_DIRECTIONS = {
     "west":    ((1.0, 0.0, 0.0),  (0.0, 0.0, 1.0)),
 }
 
+# ...but the table is written for a model whose +Y IS north, and Revit exports on
+# PROJECT north. These buttons have to reproduce the Revit view of the same name,
+# and Revit's named elevations follow TRUE north - so they turn with it.
+#
+# They turn in QUARTER TURNS ONLY. Revit's elevation markers sit square to the
+# model, and get NAMED for whichever compass point they most nearly face; an
+# architect does not skew a marker 8 degrees to chase true north, and neither
+# should we, or every elevation would render off-square to the building it is an
+# elevation of. Snapping reproduces Revit's own markers exactly rather than
+# approximately. Measured on a real site (project north 98.04 deg off true):
+# snapped, all four buttons hit their Revit counterpart to 0.00 deg; unsnapped,
+# all four are 8.04 deg off; unrotated, "south" shows the WEST elevation.
+#
+# Plan and ceiling do NOT turn: Revit draws its plans to project north with
+# project north up the sheet, so that is what a plan render must match. Same
+# rule as the elevations - match the Revit view of the same name - just a
+# different answer, because Revit itself treats the two differently.
+_COMPASS_DIRECTIONS = ("north", "south", "east", "west")
+
+
+def _quarter_turns(north_offset_deg):
+    """How many 90 deg steps of true north the named elevations follow."""
+    try:
+        return int(round(float(north_offset_deg) / 90.0)) % 4
+    except (TypeError, ValueError):
+        return 0
+
+
+def _rotate_quarters(vector, turns):
+    """Rotate a direction counter-clockwise about Z in exact quarter turns.
+
+    Integer swaps rather than sin/cos: a quarter turn must leave (0, -1, 0) as
+    exactly (1, 0, 0), not 1.0 with 6e-17 of float dust on the other axis.
+    """
+    x, y, z = vector
+    for _ in range(turns % 4):
+        x, y = -y, x
+    return (x, y, z)
+
+
+def drawing_direction(direction, north_offset_deg=0.0):
+    """(forward, up hint) for a drawing view. -> two 3-tuples.
+
+    `north_offset_deg` is coordinate_system.true_north_degrees: how far true
+    north sits counter-clockwise of the scene's +Y. See the note above for why
+    the compass views turn by whole quarters of it and the flat views not at all.
+    """
+    forward, up = DRAWING_DIRECTIONS.get(direction, DRAWING_DIRECTIONS["plan"])
+    if direction not in _COMPASS_DIRECTIONS:
+        return forward, up
+    return _rotate_quarters(forward, _quarter_turns(north_offset_deg)), up
+
 # The ground plane spans the whole site; a drawing must frame the BUILDING, so the
 # 2D framing / cut excludes it from the bounding box (it still renders as a ground line).
 _DRAWING_BBOX_EXCLUDE = ("BIR_Ground",)
@@ -223,7 +275,7 @@ def convert_projection(cam_obj, mode, focal_mm=None, extra_shift=0.0):
 
 
 def frame_ortho_drawing(cam_obj, direction, ortho_scale=None, aspect=1.0,
-                        margin=DEFAULT_MARGIN):
+                        margin=DEFAULT_MARGIN, north_offset_deg=0.0):
     """Pose `cam_obj` as an orthographic architectural drawing looking from
     `direction` (a key in DRAWING_DIRECTIONS: plan / ceiling / north / south /
     east / west), framed on the scene bounding box.
@@ -236,7 +288,7 @@ def frame_ortho_drawing(cam_obj, direction, ortho_scale=None, aspect=1.0,
     to enclose the model; a section cut layers on top via apply_section_cut().
     Returns the camera object.
     """
-    fwd_raw, up_raw = DRAWING_DIRECTIONS.get(direction, DRAWING_DIRECTIONS["plan"])
+    fwd_raw, up_raw = drawing_direction(direction, north_offset_deg)
     forward = mathutils.Vector(fwd_raw).normalized()
     up_hint = mathutils.Vector(up_raw).normalized()
     cam_data = cam_obj.data

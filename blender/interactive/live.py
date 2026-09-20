@@ -616,7 +616,14 @@ def _update_engine(self, context):
             clouds.apply_render_settings(context, cl.quality)
 
 
+def _north_offset():
+    """The loaded model's true-north angle, or 0 when nothing is loaded."""
+    from blender.pipeline.world import north_offset
+    return north_offset(_SPEC or {})
+
+
 def _apply_sun_direction(az, alt):
+    """`az` is a SCENE azimuth (measured from +Y), not a compass bearing."""
     import math
     from blender.pipeline.world import _to_sun_vector
     h = _helpers()
@@ -652,6 +659,10 @@ def _recompute_sun():
     doy = sun_calc.day_of_year(st.sun_month, st.sun_day)
     az, alt = sun_calc.solar_position(st.sun_lat, st.sun_lon, doy,
                                       st.sun_time, st.sun_tz)
+    # solar_position gives a real compass bearing; the scene is on project
+    # north, so turn it into the scene's axes before anything is pointed.
+    from blender.pipeline.world import scene_azimuth
+    az = scene_azimuth(az, _north_offset())
     _SYNCING = True
     try:                                    # reflect into the manual sliders, no recursion
         st.sun_azimuth = az % 360.0
@@ -984,7 +995,11 @@ def _pose_drawing(direction, retrace=False):
     denom = _SCALE_DENOM.get(st.drawing_scale, 0)
     w_mm, _h = _paper_dims_mm(st)
     ortho_scale = (w_mm / 1000.0) * denom if denom else None
-    cammod.frame_ortho_drawing(cam, direction, ortho_scale=ortho_scale, aspect=aspect)
+    # Revit's named elevations follow TRUE north, so these do too - in quarter
+    # turns, which is how Revit's own square markers get named. See camera.py.
+    cammod.frame_ortho_drawing(cam, direction, ortho_scale=ortho_scale,
+                               aspect=aspect,
+                               north_offset_deg=_north_offset())
     cammod.apply_section_cut(cam, st.drawing_cut_depth if st.drawing_cut else 0.0)
     st.drawing_last = direction
     _SYNCING = True                       # reflect ORTHO in the View panel without

@@ -32,6 +32,50 @@ def _ndc(p):
     return world_to_camera_view(bpy.context.scene, bpy.context.scene.camera, p)
 
 
+def check_compass_north():
+    """The named elevations reproduce REVIT's elevations of the same name.
+
+    Revit's markers sit square to the model and are NAMED for the compass, so
+    these turn with true north in whole quarter turns. The case below is real:
+    Woolfactory5.rvt, project north 98.04 deg off true, whose cached Revit
+    elevation views look "North" -> +X and "West" -> +Y. Snapped, all four
+    buttons hit those exactly; unsnapped they are 8.04 deg off; unrotated,
+    "south" shows the WEST elevation, which is how the bug was reported.
+    """
+    from blender.pipeline import camera as cam_mod
+
+    # No rotation without a north angle.
+    assert cam_mod.drawing_direction("north", 0.0)[0] == (0.0, -1.0, 0.0)
+    assert cam_mod.drawing_direction("south", 0.0)[0] == (0.0, 1.0, 0.0)
+
+    # The real site: every button lands on Revit's own view, exactly.
+    revit = {"north": (1.0, 0.0, 0.0), "south": (-1.0, 0.0, 0.0),
+             "east": (0.0, -1.0, 0.0), "west": (0.0, 1.0, 0.0)}
+    for name, want in revit.items():
+        got, up = cam_mod.drawing_direction(name, 98.04)
+        assert got == want, "%s: %s != Revit's %s" % (name, got, want)
+        assert up == (0.0, 0.0, 1.0), up
+
+    # Quarter turns only - and the WRONG SIGN is a visibly different answer, so
+    # a sign slip can never pass this.
+    assert cam_mod._quarter_turns(98.04) == 1
+    assert cam_mod._quarter_turns(44.0) == 0, "under 45 deg stays put"
+    assert cam_mod._quarter_turns(-98.04) == 3
+    assert cam_mod.drawing_direction("south", -98.04)[0] == (1.0, 0.0, 0.0)
+
+    # Exact axes, no float dust from sin/cos of 90 degrees.
+    for name in revit:
+        for comp in cam_mod.drawing_direction(name, 98.04)[0]:
+            assert comp in (-1.0, 0.0, 1.0), comp
+
+    # Plan and ceiling never turn: Revit draws plans to project north.
+    for flat in ("plan", "ceiling"):
+        assert (cam_mod.drawing_direction(flat, 98.04)
+                == cam_mod.drawing_direction(flat, 0.0)), flat
+
+    print("named elevations match Revit's own (98.04 deg site)  OK")
+
+
 def main():
     from blender.pipeline.run import build_scene
     from blender.pipeline import camera as cam_mod
@@ -274,6 +318,8 @@ def main():
              if f.lower() != "#000000"]
     assert fills, "poche fill missing from the SVG export"
     print("poche: cut cap (render) + fill in SVG export, clear works OK")
+
+    check_compass_north()
 
     print("DRAWING OK")
 

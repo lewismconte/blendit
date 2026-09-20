@@ -50,6 +50,30 @@ def _site_location(doc, sun):
         pass
 
 
+def compass_azimuth(frame_azimuth_radians):
+    """GetFrameAzimuth -> the contract's compass azimuth. -> degrees 0..360.
+
+    It is ALREADY measured clockwise from north, the same convention as the
+    Lighting-study Azimuth property; the only thing it needs is normalising,
+    because it can come back negative (-108.2 for a bearing of 251.8).
+
+    Measured empirically, not from the docs: tools/calibrate_sun.py takes every
+    cached extraction that carries Revit's own azimuth AND altitude, and asks
+    which reading of the azimuth fits the real solar position for that site and
+    date. Over 11 views across five sample models (Melbourne, Los Angeles,
+    Pennsylvania, Boston x2) the raw value fits to within 1.02 deg at worst,
+    while reading it as counter-clockwise-from-east - which the API remarks
+    about "differs from Revit's standard Lighting Study Azimuth value" invite -
+    is out by 23 deg at the median and 44 at the worst. Do not "fix" this back
+    without re-running that script.
+
+    Still measured from TRUE north. Revit's sun angles carry no knowledge of
+    the project's north rotation - that is a separate correction, applied on
+    the Blender side from coordinate_system.true_north_degrees.
+    """
+    return math.degrees(frame_azimuth_radians) % 360.0
+
+
 def _fmt_date(dt):
     return "%04d-%02d-%02d" % (dt.Year, dt.Month, dt.Day)
 
@@ -112,10 +136,12 @@ def _sun_settings(view3d, sun):
     try:
         if still:
             frame = sst.ActiveFrame
-            sun["azimuth_degrees"] = math.degrees(sst.GetFrameAzimuth(frame))
+            sun["azimuth_degrees"] = compass_azimuth(sst.GetFrameAzimuth(frame))
             sun["altitude_degrees"] = math.degrees(sst.GetFrameAltitude(frame))
         elif (DB is not None and stype == DB.SunAndShadowType.Lighting
                 and not getattr(sst, "RelativeToView", True)):
+            # SunAndShadowSettings.Azimuth is the ordinary Lighting Study
+            # azimuth, already clockwise from north, so it needs no swap.
             sun["azimuth_degrees"] = math.degrees(sst.Azimuth)
             sun["altitude_degrees"] = math.degrees(sst.Altitude)
     except Exception:

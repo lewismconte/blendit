@@ -25,10 +25,46 @@ _SKY_GAIN = 0.4       # tame the (very bright) physical sky so it doesn't wash o
 _SUN_GAIN = 5.0       # sun as the dominant key -> contrast + crisp shadows
 
 
+def north_offset(spec):
+    """How far the model's +Y is rotated from TRUE north. -> degrees CCW.
+
+    Revit hands over geometry in PROJECT north coordinates, so +Y in this scene
+    is project north, not the real thing. Every compass angle that arrives -
+    Revit's own sun angles and the astronomical calculation alike - is measured
+    from TRUE north. This is the number that reconciles them.
+    """
+    try:
+        cs = spec.get("coordinate_system") or {}
+        return float(cs.get("true_north_degrees") or 0.0)
+    except Exception:
+        return 0.0
+
+
+def scene_azimuth(compass_azimuth_deg, offset_deg):
+    """A true-north compass azimuth -> an azimuth in this scene's axes.
+
+    True north sits `offset` degrees counter-clockwise of the scene's +Y, so
+    everything measured from true north is that much clockwise of where the
+    same number would land if +Y were true north: subtract.
+    """
+    return (float(compass_azimuth_deg) - float(offset_deg)) % 360.0
+
+
 def setup_world(spec, scale):
     sun = spec.get("sun", {})
     world_spec = spec.get("world", {})
-    alt_deg, az_deg = _sun_angles(sun)
+    alt_deg, compass_az = _sun_angles(sun)
+
+    # The sun arrives as a real-world compass bearing; the scene is built on
+    # project north. Without this the shadows are out by the project's north
+    # angle in every model whose north is not zero - and silently, because
+    # every individual number involved is correct.
+    offset = north_offset(spec)
+    az_deg = scene_azimuth(compass_az, offset)
+    if abs(offset) > 0.05:
+        print("[Blendit] true north is %+.2f deg from project north; sun "
+              "azimuth %.1f (compass) -> %.1f in model axes."
+              % (offset, compass_az, az_deg))
 
     # A below-horizon sun (a midnight-dated study) renders a black sky. Lift it
     # just above the horizon so the render is usable (azimuth kept, so the
