@@ -8,10 +8,17 @@ fallback (and the 2D-view path), where link content can only be approximated.
 Material ids inside links are namespaced per linked DOCUMENT ("mat_l<n>_<id>")
 and resolved against that document by materials.extract_materials.
 
+WYSIWYG has one edge the bundle must NOT inherit: the view also substitutes
+MATERIALS (phase graphic overrides), so OnMaterial can report "Phase - New"
+instead of the element's real surface. Every flushed element therefore passes
+through bir_extract/element_materials.Resolver, which rewrites a reported
+material back to the element's own when the element does not own it.
+
 IronPython 2.7 + pure ASCII. Keep it that way.
 """
 from bir_contract.transport import MeshData
 from bir_extract import _compat
+from bir_extract import element_materials
 
 DB = _compat.DB
 _DEFAULT_MAT = "mat_default"
@@ -46,6 +53,7 @@ def extract_view(doc, view3d, progress=None):
     if not ctx.meshes:
         raise RuntimeError("CustomExporter produced no geometry")
     _append_rpc_proxies(doc, view3d, ctx)
+    ctx.materials.log_summary()
     return ctx.meshes, ctx.elements, ctx.material_ids, ctx.link_docs, ctx.lights
 
 
@@ -76,6 +84,8 @@ def _append_rpc_proxies(doc, view3d, ctx):
             geo._collect(g, groups, prefix, xf)
             if not groups:
                 continue
+            groups = element_materials.remap_groups(
+                groups, ctx.materials.repair(cur_doc, el, prefix, groups.keys()))
             cat = "Element"
             try:
                 if el.Category is not None:
@@ -150,6 +160,7 @@ class _Context(DB.IExportContext):
         self.link_docs = {}
         self.rpc_elements = []                # (doc, prefix, link_xf, elem_id, scope)
         self._rpc_seen = set()
+        self.materials = element_materials.Resolver()   # view-substitution repair
         self.lights = []                      # [{doc, scope, eid, pos, dir}] (OnLight)
         self._light_seen = set()
         self._link_xf = [None]                # LINK-scope transform only (no
@@ -360,12 +371,18 @@ class _Context(DB.IExportContext):
         eid = _node_eid(raw, self._scope[-1])   # material key stays doc-scoped
         cat = "Element"
         level = ""
+        el = None
         try:
             el = cur_doc.GetElement(element_id)
             if el is not None and el.Category is not None:
                 cat = el.Category.Name.replace(" ", "")
         except Exception:
             pass
+        # OnMaterial reported what the VIEW displays, which is the phase graphic
+        # override (if any), not the element's material. Put it back.
+        groups = element_materials.remap_groups(
+            groups,
+            self.materials.repair(cur_doc, el, self._prefixes[-1], groups.keys()))
         single = len(groups) == 1
         n = 0
         for mat_key, data in groups.items():

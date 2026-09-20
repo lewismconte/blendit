@@ -9,12 +9,32 @@ is what you want for crisp hard-surface architecture.
 Collected geometry: Solids (tessellated per face), GeometryInstances (recursed),
 and bare DB.Mesh objects (imported CAD / DirectShape content, which never comes
 through as a Solid and would otherwise silently vanish from the render).
+
+Because `Options.View` is set, the material ids Revit hands back are the VIEW's
+(phase graphic overrides substitute their own material), so every element's
+material keys pass through bir_extract/element_materials.Resolver before they
+become MeshData - same repair the CustomExporter path applies.
 """
 from bir_contract.transport import MeshData
 from bir_extract import _compat
+from bir_extract import element_materials
 
 DB = _compat.DB
 _DEFAULT_MAT = "mat_default"
+_shared_resolver = None
+
+
+def _resolver(resolver):
+    """The caller's Resolver, or a lazily-created shared one. The live-sync delta
+    path calls extract_element directly and has no extraction-wide object to hang
+    a resolver off; a process-wide default keeps the type cache warm across
+    patches and keeps a patch's material keys identical to the full load's."""
+    if resolver is not None:
+        return resolver
+    global _shared_resolver
+    if _shared_resolver is None:
+        _shared_resolver = element_materials.Resolver()
+    return _shared_resolver
 
 
 def view_options(view3d):
@@ -54,6 +74,7 @@ def extract_geometry(doc, view3d, progress=None):
     elements = []
     material_ids = set()
     link_docs = {}
+    resolver = element_materials.Resolver()
 
     for idx, elem in enumerate(elems):
         if progress is not None and (idx % 25 == 0 or idx == total - 1):
@@ -68,20 +89,22 @@ def extract_geometry(doc, view3d, progress=None):
                 # walk the linked document's own elements instead. BEFORE the
                 # geometry fetch: a link's own geo is empty/None by design.
                 _extract_link(view3d, elem, meshes, elements, material_ids,
-                              link_docs, progress)
+                              link_docs, progress, resolver)
                 continue
         except Exception:
             pass
 
-        m, e, mids = extract_element(doc, elem, opt)
+        m, e, mids = extract_element(doc, elem, opt, resolver=resolver)
         meshes.extend(m)
         elements.extend(e)
         material_ids.update(mids)
 
+    resolver.log_summary()
     return meshes, elements, material_ids, link_docs
 
 
-def extract_element(doc, elem, opt, prefix="mat_", xf=None, eid=None):
+def extract_element(doc, elem, opt, prefix="mat_", xf=None, eid=None,
+                    resolver=None):
     """Tessellate ONE element -> (meshes, elements, material_ids).
 
     The per-element body shared by the full extract_geometry sweep and the
@@ -103,6 +126,10 @@ def extract_element(doc, elem, opt, prefix="mat_", xf=None, eid=None):
         groups = {}
     if not groups:
         return [], [], set()
+
+    groups = element_materials.remap_groups(
+        groups,
+        _resolver(resolver).repair(doc, elem, prefix, groups.keys()))
 
     cat = _category_name(elem)
     if eid is None:
@@ -127,7 +154,7 @@ def extract_element(doc, elem, opt, prefix="mat_", xf=None, eid=None):
 
 
 def _extract_link(view3d, link, meshes, elements, material_ids, link_docs,
-                  progress=None):
+                  progress=None, resolver=None):
     """Extract a RevitLinkInstance by walking the LINKED document's elements,
     each transformed by the instance's total transform into host coordinates.
     Material keys are namespaced per instance ("mat_l<id>_<matid>") so
@@ -177,7 +204,7 @@ def _extract_link(view3d, link, meshes, elements, material_ids, link_docs,
                 pass
         m, e, mids = extract_element(
             ldoc, le, opt, prefix=prefix, xf=xf,
-            eid="l%s_%s" % (lid, _compat.id_value(le.Id)))
+            eid="l%s_%s" % (lid, _compat.id_value(le.Id)), resolver=resolver)
         meshes.extend(m)
         elements.extend(e)
         material_ids.update(mids)

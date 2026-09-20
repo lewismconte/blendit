@@ -106,3 +106,45 @@ at `scale_m`: Revit gives no UVs, and its own mapping is real-world box
 projection, so this reproduces it exactly (merge guarantees Object == world
 metres). A material whose asset can't be read falls back to the graphics-shading
 approximation + the curated library, as before.
+
+## Material identity vs. view display (producer-side, no contract change)
+
+Extraction is WYSIWYG — `view_export.py` walks the view with `CustomExporter`,
+`geometry.py` sets `Options.View` — so Revit reports the material the **view
+displays**, not the one **assigned to the element**. Those differ whenever the
+view carries *phase graphic overrides* (`Manage → Phases → Graphic Overrides` has
+a Material column, populated in most office templates): Revit substitutes the
+phase's override material, and the bundle ends up full of materials named
+"Phase - New" / "Existing" instead of "Brick - Buff" — flat, wrong, and invisible
+to the name-keyword matching in `blender/pipeline/material_library.py`.
+
+`bir_extract/element_materials.py` repairs this before the keys become
+`MeshData`, on **both** geometry paths. The rule is mechanism-agnostic on
+purpose — it never names phases:
+
+1. If the view reported **two or more** materials for the element, do nothing.
+   Substitution is per-element and all-or-nothing, so a preserved multi-material
+   split proves there was no substitution. This guard is also what keeps the
+   heuristic from mangling elements whose materials come from somewhere
+   `GetMaterialIds` under-reports.
+2. Otherwise ask the element what it owns — compound-structure layers, instance
+   and type `GetMaterialIds`, paint, `STRUCTURAL_MATERIAL_PARAM`, the category
+   material. If the reported material is in that set it is genuine → keep it.
+3. If it is not, rewrite it to the element's own material. **Exact** when the
+   element owns one; when it owns several the override already collapsed the
+   per-face split irrecoverably, so the primary is used (outermost
+   compound-structure layer first — the face a renderer mostly sees) and counted
+   as *approximate*.
+4. If the element owns nothing better, keep the view's material — it at least
+   renders as something.
+
+Cost on a model with no overrides: one `GetTypeId()` and a dict hit per element
+(the owned-material set is cached per element type, namespaced by the link's
+material prefix). The repair logs a one-line summary with the exact/approximate
+counts; `BLENDIT_MATERIAL_REPAIR=0` disables it.
+
+**Not fixed by this, by design:** materials that are genuinely assigned but badly
+*named* — imported CAD and DirectShape content whose materials Revit auto-creates
+as `Render Material 128-128-128`. Those really are the element's own material,
+so there is nothing better to resolve to; making them render well is a
+Blender-side concern.
