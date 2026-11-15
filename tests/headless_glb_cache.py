@@ -55,12 +55,14 @@ def main():
     print("OK  wrote .glb bundle:", bundle_ref)
 
     # 2. import the .glb through the pipeline (which merges by material: two
-    #    distinct-material boxes -> two BIR_Mat_* objects).
+    #    distinct-material boxes -> two readable BIR_Mat_* objects).
     from blender.pipeline.run import import_scene
-    _MERGED = {"BIR_Mat_mat_1", "BIR_Mat_mat_2"}
+    _MERGED = {"BIR_Mat_Concrete", "BIR_Mat_Steel"}
     loaded, spec2 = import_scene(bundle_ref, overrides={"camera_type": "perspective"})
     names = set(loaded.node_to_object)
     assert names == _MERGED, "merge gave unexpected objects: %s" % names
+    assert all(o.get("material_id") for o in loaded.node_to_object.values()), \
+        "merged objects lost their material_id property"
     print("OK  imported + merged .glb -> objects:", sorted(names))
 
     # 3. cache round-trip: save clean .blend, reopen, rebuild loaded

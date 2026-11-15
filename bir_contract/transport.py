@@ -11,7 +11,7 @@ import datetime
 import json
 import os
 
-CONTRACT_VERSION = "0.3.0"
+CONTRACT_VERSION = "0.4.0"
 SCENE_SPEC_FILENAME = "scene_spec.json"
 
 

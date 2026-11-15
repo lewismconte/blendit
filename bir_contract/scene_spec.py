@@ -107,9 +107,13 @@ class Material:
     # Each slot: {"uri": str (bundle-relative, e.g. "textures/brick.jpg"),
     #             "scale_m": [sx, sy] (real-world size of one tile, metres),
     #             "offset_m": [ox, oy], "rotation_deg": float,
-    #             "amount": float (bump only)}.
-    # Revit gives NO UVs, so the Blender side maps these with real-world box
-    # projection (Object coords == metres) - which is how Revit itself maps them.
+    #             "amount": float (bump only),
+    #             "tint": [r, g, b] (image tint multiplier, linear; optional),
+    #             "invert": bool (draw 1 - image; optional),
+    #             "fade": float 0..1 (image over base colour; optional)}.
+    # Revit's tessellation here carries no reliable UVs, so the Blender side maps
+    # these with real-world box projection (Object coords == metres) - which is
+    # how Revit itself maps them.
     maps: Optional[dict] = None
 
 

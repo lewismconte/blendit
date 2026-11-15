@@ -102,7 +102,10 @@
         "scale_m": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
         "offset_m": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
         "rotation_deg": { "type": "number" },
-        "amount": { "type": "number" }
+        "amount": { "type": "number" },
+        "tint": { "$ref": "#/$defs/vec3" },
+        "invert": { "type": "boolean" },
+        "fade": { "type": "number", "minimum": 0, "maximum": 1 }
       }
     },
     "camera": {

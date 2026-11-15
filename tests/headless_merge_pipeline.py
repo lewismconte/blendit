@@ -81,8 +81,9 @@ def main():
     elems = {e["node"]: e for e in spec2.get("geometry", {}).get("elements", [])}
     assert elems, "reopen: no reconstructed elements"
     sample = next(iter(loaded2.node_to_object))
-    assert elems.get(sample, {}).get("material_id") == merge.material_id_from_name(sample)
-    print("reopen: %d merged objects, material map reconstructed from names"
+    assert elems.get(sample, {}).get("material_id") == \
+        merge.material_id_from_object(loaded2.node_to_object[sample])
+    print("reopen: %d merged objects, material map reconstructed from stamped ids"
           % len(loaded2.node_to_object))
 
     _apply_overrides(spec2, {"camera_type": "perspective", "mode": "linework",

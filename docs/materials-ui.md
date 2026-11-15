@@ -50,8 +50,9 @@ in one glance, and teaches users the name-matching rules.
 ## Phase 2 — selection-aware
 
 - **From selection**: click any object in the viewport → button selects its
-  material in the list (objects are named `BIR_Mat_<material_id>` — the
-  lookup is free).
+  material in the list (merged objects are named `BIR_Mat_<material name>`, with
+  the id stamped as `obj["material_id"]` - the lookup is free).
+
 - **Isolate toggle**: temporarily grey out everything except the selected
   material's objects ("where is this material?"); restore on toggle off.
 - **Apply to similar**: copy this material's overrides onto every material

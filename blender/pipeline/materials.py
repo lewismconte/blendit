@@ -124,12 +124,12 @@ def _map_path(entry, base_dir):
 
 
 def _build_revit_maps(nt, bsdf, rec, base_dir):
-    """Real Revit appearance textures (contract 0.2.0 `maps`): the diffuse bitmap
-    box-projected at its real-world scale, plus the bump map when present. Returns
-    False when there's no resolvable diffuse map, so the caller can fall back to
-    the curated library. Object coords == world metres (merge bakes the matrix),
-    so a 0.6 m brick tile is 0.6 m on the wall - the same real-world mapping
-    Revit uses, no UVs needed."""
+    """Real Revit appearance textures (contract 0.4.0 `maps`): the diffuse bitmap
+    box-projected at its real-world scale, plus the optional image tint, invert,
+    Generic image fade and bump map. Returns False when there's no resolvable
+    diffuse map, so the caller can fall back to the curated library. Object coords
+    == world metres (merge bakes the matrix), so a 0.6 m brick tile is 0.6 m on the
+    wall - the same real-world mapping Revit uses, no UVs needed."""
     maps = rec.get("maps") or {}
     diffuse = maps.get("diffuse") or {}
     dpath = _map_path(diffuse, base_dir)
@@ -157,9 +157,40 @@ def _build_revit_maps(nt, bsdf, rec, base_dir):
     img.location = (-460, 60)
     img.image = bpy.data.images.load(dpath, check_existing=True)
     img.projection = "BOX"
-    img.projection_blend = 0.25
+    img.projection_blend = 0.0       # hard per-axis choice, like Revit's face mapping
     nt.links.new(mp.outputs["Vector"], img.inputs["Vector"])
-    nt.links.new(img.outputs["Color"], bsdf.inputs["Base Color"])
+
+    # Image look, in BimGo's tested order: invert -> image tint -> fade over the
+    # render colour. Tint is linear; the image node already decodes sRGB to linear.
+    color = img.outputs["Color"]
+    if diffuse.get("invert"):
+        inv = nt.nodes.new("ShaderNodeInvert")
+        inv.location = (-300, 60)
+        inv.inputs["Fac"].default_value = 1.0
+        nt.links.new(color, inv.inputs["Color"])
+        color = inv.outputs["Color"]
+    tint = diffuse.get("tint")
+    if tint:
+        mul = nt.nodes.new("ShaderNodeMix")
+        mul.data_type = "RGBA"
+        mul.blend_type = "MULTIPLY"
+        mul.location = (-120, 60)
+        mul.inputs[0].default_value = 1.0
+        mul.inputs[6].default_value = _rgba(tint)
+        nt.links.new(color, mul.inputs[7])
+        color = mul.outputs[2]
+    fade = diffuse.get("fade")
+    if fade is not None and float(fade) < 0.999:
+        mix = nt.nodes.new("ShaderNodeMix")
+        mix.data_type = "RGBA"
+        mix.blend_type = "MIX"
+        mix.location = (60, 60)
+        mix.inputs[0].default_value = max(0.0, min(1.0, float(fade)))
+        mix.inputs[6].default_value = _rgba(
+            rec.get("base_color", [0.8, 0.8, 0.8]))
+        nt.links.new(color, mix.inputs[7])
+        color = mix.outputs[2]
+    nt.links.new(color, bsdf.inputs["Base Color"])
 
     bpath = _map_path(maps.get("bump"), base_dir)
     if bpath is not None:
@@ -168,7 +199,7 @@ def _build_revit_maps(nt, bsdf, rec, base_dir):
         bimg.image = bpy.data.images.load(bpath, check_existing=True)
         bimg.image.colorspace_settings.name = "Non-Color"
         bimg.projection = "BOX"
-        bimg.projection_blend = 0.25
+        bimg.projection_blend = 0.0
         nt.links.new(mp.outputs["Vector"], bimg.inputs["Vector"])
         bump = nt.nodes.new("ShaderNodeBump")
         bump.location = (-200, -280)
@@ -215,6 +246,71 @@ def apply_materials(loaded, engine="CYCLES"):
         if mat is not None:
             obj.data.materials.clear()
             obj.data.materials.append(mat)
+    try:
+        write_audit(loaded, overrides, base_dir)
+    except Exception:
+        pass
+
+
+def write_audit(loaded, overrides=None, base_dir=None):
+    """Write materials_audit.txt beside the bundle: one row per Revit material
+    with its texture, the Blender surface it resolved to, and its PBR values.
+    Answers "why is this wall grey / what did my brick map to?" without opening
+    a dozen material tabs."""
+    spec = loaded.spec or {}
+    if not base_dir:
+        return None
+    overrides = overrides or {}
+    lines = ["Blendit material audit",
+             "======================",
+             "%-34s %-12s %-26s %-28s %-18s %-16s"
+             % ("Revit material", "class", "texture", "Blender surface",
+                "base colour", "metal / rough")]
+    for rec in spec.get("materials", []) or []:
+        mid = rec.get("id", "")
+        name = rec.get("name") or mid
+        maps = rec.get("maps") or {}
+        dmap = maps.get("diffuse") or {}
+        uri = dmap.get("uri")
+        chosen = overrides.get(mid) or "auto"
+        if chosen not in ("auto", "plain"):
+            surface = "override: %s" % chosen
+        elif uri:
+            surface = "Revit texture"
+        else:
+            try:
+                cat = material_library.category_for(name)
+            except Exception:
+                cat = None
+            surface = ("library: %s" % cat) if cat else "flat colour"
+        texture = os.path.basename(uri) if uri else "none"
+        flags = []
+        if dmap.get("invert"):
+            flags.append("invert")
+        if dmap.get("tint"):
+            flags.append("tint")
+        if dmap.get("fade") is not None:
+            flags.append("fade %.2f" % float(dmap["fade"]))
+        if flags:
+            texture += " (" + ", ".join(flags) + ")"
+        base = rec.get("base_color", [0.8, 0.8, 0.8])
+        lines.append("%-34s %-12s %-26s %-28s %-18s %-16s"
+                     % (name[:32], (rec.get("appearance_class") or "-")[:12],
+                        texture[:26], surface[:28],
+                        "%.2f,%.2f,%.2f" % (base[0], base[1], base[2]),
+                        "%.2f / %.2f" % (float(rec.get("metallic", 0.0)),
+                                         float(rec.get("roughness", 0.5)))))
+    path = os.path.join(base_dir, "materials_audit.txt")
+    try:
+        f = open(path, "w", encoding="utf-8")
+        try:
+            f.write("\n".join(lines) + "\n")
+        finally:
+            f.close()
+        print("Blendit: material audit -> %s" % path)
+        return path
+    except Exception:
+        return None
 
 
 # --- override helpers for the white / shadow presets ------------------------

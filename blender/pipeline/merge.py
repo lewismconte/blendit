@@ -12,8 +12,10 @@ one object per group but left the rest behind (a .blend with 36 merged objects +
 pure data API, so it works in any context and we delete the originals ourselves.
 
 The look is unchanged because the presets assign exactly one material per object,
-keyed by material id. Each merged object is named BIR_Mat_<material_id> so the id is
-recoverable from the name (the .blend cache reopen path uses that).
+keyed by material id. Each merged object is named BIR_Mat_<material name> (so the
+Outliner reads "BIR_Mat_Glass", not "BIR_Mat_mat_123") and stamps its id on
+obj["material_id"], which the .blend cache reopen uses. An old cache whose name is
+BIR_Mat_<id> still resolves through that name.
 
 TRADEOFF: this collapses per-element identity (node_to_object goes from one entry
 per Revit element to one per material) - the Phase-4 "data back to Revit" direction,
@@ -27,10 +29,34 @@ _DEFAULT_MAT = "mat_default"
 
 
 def material_id_from_name(name):
-    """-> the material id encoded in a merged object's name, or None."""
+    """-> the material id encoded in an OLD merged object's name (BIR_Mat_<id>).
+    New caches also stamp obj["material_id"]; cache.py prefers that."""
     if name and name.startswith(MERGED_PREFIX):
         return name[len(MERGED_PREFIX):]
     return None
+
+
+def material_id_from_object(obj):
+    """-> a merged object's material id. The custom property is the stable
+    handle; the old BIR_Mat_<id> name is kept as a fallback for caches written
+    before objects were given readable names."""
+    try:
+        mid = obj.get("material_id")
+        if mid:
+            return str(mid)
+    except Exception:
+        pass
+    return material_id_from_name(getattr(obj, "name", ""))
+
+
+def _readable_name(label):
+    """A Blender-safe, readable label: no control chars, not absurdly long."""
+    try:
+        text = str(label or "").strip()
+    except Exception:
+        text = ""
+    text = "".join(c for c in text if ord(c) >= 32)
+    return text[:48].strip() or "Material"
 
 
 def merge_by_material(loaded):
@@ -38,6 +64,10 @@ def merge_by_material(loaded):
     (node_to_object + spec.geometry.elements) and returns it."""
     spec = loaded.spec
     elems = {e["node"]: e for e in spec.get("geometry", {}).get("elements", [])}
+    names = {}
+    for rec in spec.get("materials", []) or []:
+        if rec.get("id"):
+            names[rec["id"]] = rec.get("name") or rec["id"]
 
     groups = {}    # material_id -> [objects]
     cats = {}      # material_id -> a representative category
@@ -52,7 +82,8 @@ def merge_by_material(loaded):
     new_node_to_object = {}
     new_elements = []
     for mid, obj_list in groups.items():
-        merged = _merge_group(obj_list, mid)
+        label = names.get(mid) or mid
+        merged = _merge_group(obj_list, mid, MERGED_PREFIX + _readable_name(label))
         if merged is None:
             continue
         new_node_to_object[merged.name] = merged
@@ -91,18 +122,21 @@ def _bake_transform(obj):
         pass
 
 
-def _merge_group(obj_list, mid):
+def _merge_group(obj_list, mid, name=None):
     """Combine all objects sharing a material into one new object (via bmesh, so it
-    is context-independent), then delete the originals."""
+    is context-independent), then delete the originals. `name` is the readable
+    merged-object name (BIR_Mat_<material name>); the material id is stamped on
+    the object so the cache reopen never depends on parsing a display name."""
     obj_list = [o for o in obj_list
                 if o is not None and getattr(o, "type", None) == "MESH"]
     if not obj_list:
         return None
-    name = MERGED_PREFIX + str(mid)
+    name = name or (MERGED_PREFIX + str(mid))
 
     if len(obj_list) == 1:                  # nothing to combine; rename in place
         o = obj_list[0]
         o.name = name
+        o["material_id"] = str(mid)
         _bake_transform(o)                  # keep the Object==metres invariant
         return o
 
@@ -125,6 +159,7 @@ def _merge_group(obj_list, mid):
     bm.free()
 
     new_obj = bpy.data.objects.new(name, me)
+    new_obj["material_id"] = str(mid)
     if src_mat is not None:
         new_obj.data.materials.append(src_mat)
     bpy.context.scene.collection.objects.link(new_obj)

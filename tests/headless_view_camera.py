@@ -104,6 +104,31 @@ def main():
           spec_fit["camera"]["type"] == "orthographic"
           and spec_fit["render"]["resolution"] == [1920, 1080])
 
+    # --- 5. far clip covers a large scene (no clean half-cut plane) -----------
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    mesh = bpy.data.meshes.new("bigbox")
+    import bmesh
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=6000.0)
+    bm.to_mesh(mesh)
+    bm.free()
+    obj = bpy.data.objects.new("bigbox", mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    big = {"type": "perspective", "position": [40.0, -60.0, 18.0],
+           "target": [0.0, 0.0, 8.0], "up": [0.0, 0.0, 1.0],
+           "fov_degrees": 62.0}
+    cam_obj = C.setup_camera(_spec(big), SCALE)
+    bpy.context.view_layer.update()
+    bb = C._scene_bbox()
+    pos = cam_obj.matrix_world.translation
+    far = max((mathutils.Vector((x, y, z)) - pos).length
+              for x in (bb[0].x, bb[1].x)
+              for y in (bb[0].y, bb[1].y)
+              for z in (bb[0].z, bb[1].z))
+    check("large scene: far clip reaches the whole model",
+          cam_obj.data.clip_end >= far,
+          "clip=%.0f far=%.0f" % (cam_obj.data.clip_end, far))
+
     failed = [n for n, ok in CHECKS if not ok]
     print("VIEWCAM: %d checks, %d failed%s"
           % (len(CHECKS), len(failed), (" -> " + ", ".join(failed)) if failed else ""))

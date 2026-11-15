@@ -22,6 +22,7 @@ venv/
 /out/
 /_bundles/
 /tests/_out/
+materials_audit.txt
 # NB: do NOT blanket-ignore *.png — icon.png (button) and committed fixtures stay.
 
 # OS / editor

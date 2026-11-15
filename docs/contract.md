@@ -148,3 +148,51 @@ counts; `BLENDIT_MATERIAL_REPAIR=0` disables it.
 as `Render Material 128-128-128`. Those really are the element's own material,
 so there is nothing better to resolve to; making them render well is a
 Blender-side concern.
+
+## Contract 0.4.0 — texture tint, invert and image fade (SHIPPED)
+
+Three **optional** fields on a texture map (`maps.diffuse`, and harmless on the
+others) — additive, so older bundles load unchanged:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `tint` | `[r, g, b]` | linear multiplier on the image (Revit bitmap tint × RGB amount × the appearance asset's Tint) |
+| `invert` | bool | draw `1 − image` (Revit `unifiedbitmap_Invert`) |
+| `fade` | number 0..1 | how much of the image shows over the render colour (Generic `generic_diffuse_image_fade`; 1 = all image) |
+
+The producer folds the appearance tint into both the image tint and the plain
+colour, because Revit's Appearance-tab tint multiplies the whole look. When a
+texture falls back to the graphics colour (missing/procedural), the tint is
+**not** applied — otherwise the shaded fallback would be tinted twice.
+
+The Blender side applies them in Revit's measured order: image → invert → image
+tint → fade over the base colour, all in linear light. The image nodes also use a
+hard box projection (`projection_blend = 0`) instead of Blender's default blend,
+matching Revit's per-face axis choice.
+
+
+The appearance-asset reader (`bir_extract/appearance.py`) follows the same
+stages BimGo's material round settled on, because Revit's stored bitmap paths
+are rarely portable:
+
+1. **Colour slot:** Generic (`generic_diffuse`), then the Advanced / Physical
+   family (`opaque_albedo`, `metal_f0`, `layered_diffuse`, `transparent_color`),
+   then the simple schemas' `*_color` / `*_diffuse`. `surface_albedo` is a
+   reflection map and is never treated as colour.
+2. **Path:** absolute (environment variables expanded) → Autodesk Material
+   Library roots found on this machine (`CommonProgramFiles*`) → Revit.ini
+   **Additional Render Appearance Paths** → beside the model → the library's
+   numbered `Mats` folders by file name. `|` alternatives are tried in order.
+3. **Scale:** one texture repeat is `texture_RealWorldScaleX/Y` divided by
+   `texture_UScale/VScale`. Ignoring the repeat counts made tiled materials
+   render at the wrong size.
+4. **Fallback:** if the colour slot points at a bitmap that is missing or
+   procedural, the **graphics shading colour** is used instead of the asset's
+   render colour (often a white placeholder), so the surface keeps its real
+   colour. A one-line `Blendit: materials: …` summary reports textured / missing
+   / procedural / fallback counts on every Load View.
+
+Tint, invert and image fade now ship under contract 0.4.0 (above). Still not
+carried: true per-face UVs from `PolymeshTopology.GetUVs()` — Revit's UVs are
+face parameters (sometimes normalised, sometimes real units), so Blender
+currently box-projects the textures in real-world metres instead.

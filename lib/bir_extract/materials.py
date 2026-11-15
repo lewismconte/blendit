@@ -20,6 +20,7 @@ DB = _compat.DB
 def extract_materials(doc, material_ids, link_docs=None):
     out = []
     resolved = 0
+    appearance.reset_stats()
     for mid in sorted(material_ids):
         if mid == "mat_default":
             out.append(_default_record(mid))
@@ -44,6 +45,7 @@ def extract_materials(doc, material_ids, link_docs=None):
         if n and resolved < n:
             print("Blendit: WARNING %d/%d materials fell back to Default grey "
                   "(unresolved) - render may look flat/white." % (n - resolved, n))
+        appearance.log_stats()
     except Exception:
         pass
     return out
@@ -95,6 +97,8 @@ def _from_material(doc, mat):
     rec = {"id": "", "name": name, "base_color": base, "metallic": 0.0,
            "roughness": roughness, "transparency": transparency, "ior": 1.45}
     # Appearance asset (textures / glossiness / class) wins over the graphics
-    # approximation wherever it could actually be read.
-    rec.update(appearance.read_appearance(doc, mat))
+    # approximation wherever it could actually be read. The shading colour is
+    # passed so a missing/procedural texture can fall back to it instead of the
+    # appearance's often-white render colour.
+    rec.update(appearance.read_appearance(doc, mat, shading_color=base))
     return rec

@@ -25,12 +25,14 @@ Navigation: Auto-Depth + Zoom-to-Mouse are enabled for the session (pivot follow
 the surface under the cursor; real dolly zoom). Session-only - the user's saved
 Blender preferences are not modified.
 
-    Capture  Enter / Numpad-Enter    Regen lines  L    Fly / Build  F10
+    Capture  Enter / Numpad-Enter    Regen lines  L    Frame  F
+    HUD  H    Fly / Build  F10
 """
 import argparse
 import json
 import os
 import sys
+import time
 
 import bpy
 
@@ -56,12 +58,9 @@ _MODEL_NAME = ""  # friendly model label for the HUD readout
 _BUILD_ARGS = None  # parsed args, handed from main() to the deferred build
 _OVERRIDE_DIR = None  # where material_overrides.json lives (the bundle dir)
 
-_TITLE = "BLENDIT  -  LIVE"
-_CONTROLS = [
-    "Orbit  MMB drag      Pan  Shift+MMB      Zoom  scroll (to cursor)",
-    "Walk / Fly  Shift + `   then  W A S D ,  mouse ,  E / Q",
-    "Capture  Enter      Regen lines  L      Regular UI  F10      N  panel",
-]
+_TITLE = "BLENDIT  ·  LIVE"
+_STATUS_SEEN = None
+_STATUS_AT = 0.0
 
 
 def _repo_root():
@@ -122,6 +121,20 @@ def _region(area, rtype="WINDOW"):
         if region.type == rtype:
             return region
     return None
+
+
+def _view_is_camera(context=None):
+    """True when the viewport is already looking THROUGH the export camera
+    (Frame View / numpad-0). That view IS the camera, so snapping or
+    re-asserting the projection would move the shot the user just composed."""
+    _win, area, _region_obj = _view3d_ctx(context)
+    if area is None:
+        return False
+    for space in area.spaces:
+        if space.type == "VIEW_3D":
+            r3d = getattr(space, "region_3d", None)
+            return bool(r3d is not None and r3d.view_perspective == "CAMERA")
+    return False
 
 
 def _view3d_ctx(context=None):
@@ -359,8 +372,20 @@ def _snap_camera_to_view(context=None):
 
     MUST be called from the operator's execute (pass its `context`), NOT from a
     deferred timer: the snap has to capture the pose at the instant the user
-    pressed the button, in the viewport they pressed it in."""
+    pressed the button, in the viewport they pressed it in.
+
+    Plain Perspective needs no re-assertion - and convert_projection() zeroes
+    shift_x, so calling it here silently slid a Revit-composed shot sideways on
+    every capture. Only re-project when the camera is not already plain
+    perspective, and preserve the user's lens otherwise."""
     _run_in_view3d(lambda: bpy.ops.view3d.camera_to_view(), context)
+    st = getattr(bpy.context.scene, "bir", None)
+    cam = bpy.context.scene.camera
+    if st is not None and cam is not None and st.projection == "PERSP" \
+            and cam.data.type == "PERSP":
+        if st.focal_length > 0.0:
+            cam.data.lens = st.focal_length
+        return
     _reapply_camera()
 
 
@@ -382,11 +407,30 @@ def _is_drawing_camera():
 def _snap_for_capture(context):
     """Snap the camera to the view for a free-nav capture - but keep a 2D drawing's
     exact pose (camera_to_view + convert_projection would rescale its ortho frame and
-    move its cut, throwing off the render / SVG)."""
+    move its cut, throwing off the render / SVG). A view already looking through
+    the camera (Frame View) is left completely alone: there is nothing to snap,
+    and touching it is what made Capture / Render Final jump before rendering."""
     if _is_drawing_camera():
         _enter_frame()                 # already the drawing camera; just show its frame
         return
+    if _view_is_camera(context):
+        return
     _snap_camera_to_view(context)
+
+
+def _ensure_render_clip():
+    """Extend the render camera's far clip to the current geometry. Large scenes
+    can sit beyond the fixed Revit-derived clip_end, which cuts the model with a
+    clean plane in the saved image (the viewport looks fine because its own clip
+    range is much larger)."""
+    cam = bpy.context.scene.camera
+    if cam is None:
+        return
+    try:
+        from blender.pipeline.camera import ensure_far_clip
+        ensure_far_clip(cam)
+    except Exception:
+        pass
 
 
 def _update_gizmos(self, context):
@@ -423,6 +467,10 @@ def _update_frame_view(self, context):
     if _SYNCING:
         return
     _set_frame_view(self.frame_view)
+
+
+def _update_show_hud(self, context):
+    _redraw_all()
 
 
 def _update_line_crease(self, context):
@@ -846,6 +894,8 @@ _MODE_ITEMS = [
     ("watercolor", "Watercolor", "Warm/cool wash under loose sepia lines"),
     ("risograph", "Risograph", "Two-tone riso print (blue/pink/cream) + keyline"),
 ]
+
+_MODE_LABEL = dict((k, label) for k, label, _d in _MODE_ITEMS)
 
 _LIT_MODES = ("realistic", "white", "shadow", "specular")
 # Single source of truth (shared with the headless renderer) - no local copy to drift.
@@ -1291,6 +1341,10 @@ class BIR_Settings(bpy.types.PropertyGroup):
                     "orbit / pan / zoom / walk now move the camera so you compose the "
                     "exact shot. Off = free explore (camera stays put)",
         update=_update_frame_view)
+    show_hud: bpy.props.BoolProperty(
+        name="Show HUD", default=True,
+        description="Show the Live overlay: model / mode / frame status, controls "
+                    "and messages (H toggles it)", update=_update_show_hud)
     projection: bpy.props.EnumProperty(
         name="Projection",
         items=[("PERSP", "Perspective", "Standard perspective"),
@@ -1787,6 +1841,7 @@ def _do_capture():
     global _STATUS
     out = _next_capture_path()
     sc = bpy.context.scene
+    _ensure_render_clip()
     _refresh_crosshatch_key(getattr(sc, "bir", None))
     sc.render.image_settings.file_format = "PNG"
     sc.render.filepath = out
@@ -1818,6 +1873,31 @@ class BIR_OT_toggle_mode(bpy.types.Operator):
             _enter_build()
         else:
             _enter_fly()
+        return {"FINISHED"}
+
+
+class BIR_OT_toggle_frame_view(bpy.types.Operator):
+    bl_idname = "bir.toggle_frame_view"
+    bl_label = "Frame View"
+    bl_description = "Look through the export camera (framed composition) / free nav"
+
+    def execute(self, context):
+        st = getattr(context.scene, "bir", None)
+        if st is not None:
+            st.frame_view = not st.frame_view
+        return {"FINISHED"}
+
+
+class BIR_OT_toggle_hud(bpy.types.Operator):
+    bl_idname = "bir.toggle_hud"
+    bl_label = "Toggle HUD"
+    bl_description = "Show or hide the Live overlay"
+
+    def execute(self, context):
+        st = getattr(context.scene, "bir", None)
+        if st is not None:
+            st.show_hud = not st.show_hud
+        _redraw_all()
         return {"FINISHED"}
 
 
@@ -1891,6 +1971,7 @@ def _render_still_at(out, samples):
         sc.cycles.use_denoising = True
     sc.render.image_settings.file_format = "PNG"
     sc.render.filepath = out
+    _ensure_render_clip()
     bpy.ops.render.render(write_still=True)
     sc.render.engine = prev_engine          # restore the fast viewport engine
     try:                                    # ...and the configured sample counts
@@ -2405,6 +2486,7 @@ class BIR_PT_view(_Sub, bpy.types.Panel):
         layout.prop(st, "aspect", text="")        # export frame shape == render aspect
         layout.prop(st, "projection", text="")    # Perspective / Two-Point / Ortho
         layout.prop(st, "show_gizmos", toggle=True)
+        layout.prop(st, "show_hud", toggle=True, icon="HIDE_OFF")
         clip = layout.column(align=True)
         clip.prop(st, "clip_near", slider=True)
         clip.prop(st, "clip_far")
@@ -2634,7 +2716,9 @@ _ATMO_CLASSES = (BIR_PT_atmosphere, BIR_PT_atmo_shape, BIR_PT_atmo_detail,
 _CLASSES = (BIR_MaterialItem, BIR_BookmarkItem, BIR_Settings,
             BIR_UL_materials, BIR_UL_bookmarks,
             BIR_OT_render_image, BIR_OT_render_final, BIR_OT_open_captures,
-            BIR_OT_export_vector, BIR_OT_toggle_mode, BIR_OT_regenerate_lines,
+            BIR_OT_export_vector, BIR_OT_toggle_mode,
+            BIR_OT_toggle_frame_view, BIR_OT_toggle_hud,
+            BIR_OT_regenerate_lines,
             BIR_OT_bookmark_add, BIR_OT_bookmark_remove, BIR_OT_bookmark_recall,
             BIR_OT_bookmark_render_all, BIR_OT_contact_sheet,
             BIR_OT_drawing_pose, BIR_OT_export_drawing,
@@ -2691,6 +2775,46 @@ def _maximize_toggle():
         pass
 
 
+def _open_blendit_panel():
+    """Force the N-panel open on the Blendit tab. show_region_ui alone opens the
+    region on whatever tab was last active; active_panel_category selects ours.
+    The category list only exists once the UI has drawn, so this returns False
+    until it can actually be selected (callers retry on a timer)."""
+    changed = False
+    for win, area in _iter_view3d():
+        for space in area.spaces:
+            if space.type != "VIEW_3D":
+                continue
+            try:
+                space.show_region_ui = True
+            except Exception:
+                pass
+        for region in area.regions:
+            if region.type != "UI":
+                continue
+            try:
+                with bpy.context.temp_override(window=win, area=area):
+                    region.active_panel_category = "Blendit"
+                changed = changed or region.active_panel_category == "Blendit"
+            except Exception:
+                pass
+        area.tag_redraw()
+    return changed
+
+
+def _open_panel_later(attempt=0):
+    if _open_blendit_panel() or attempt >= 6:
+        return None
+
+    def _retry():
+        return _open_panel_later(attempt + 1)
+    try:
+        bpy.app.timers.register(_retry, first_interval=0.3)
+    except Exception:
+        pass
+    return None
+
+
 def _enter_fly():
     global _FLY_MODE
     _FLY_MODE = True
@@ -2719,6 +2843,11 @@ def _enter_fly():
         area.tag_redraw()
     _set_keymap_fly(True)
     _sync_view_toggles()
+    _open_blendit_panel()
+    try:
+        bpy.app.timers.register(_open_panel_later, first_interval=0.4)
+    except Exception:
+        pass
 
 
 def _enter_build():
@@ -2833,6 +2962,7 @@ def _frame_free_view():
 
 # --- keymap -----------------------------------------------------------------
 _KEYMAP_ITEMS = []   # (keymap_item, fly_only)
+_FOREIGN_H = []      # Blender's own H bindings, muted while Fly mode owns H
 
 
 def _bind_keymap():
@@ -2850,10 +2980,58 @@ def _bind_keymap():
         _KEYMAP_ITEMS.append(
             (km.keymap_items.new("bir.toggle_mode", "F10", "PRESS"), False))
         _KEYMAP_ITEMS.append(
+            (km.keymap_items.new("bir.toggle_frame_view", "F", "PRESS"), True))
+        _KEYMAP_ITEMS.append(
+            (km.keymap_items.new("bir.toggle_hud", "H", "PRESS"), True))
+        # H also lives in Object Mode, which is checked for objects in the review
+        # scene. Add it there as well; otherwise Blender's Hide Selected can eat H.
+        km_obj = kc.keymaps.get("Object Mode")
+        if km_obj is None:
+            km_obj = kc.keymaps.new(name="Object Mode", space_type="EMPTY")
+        _KEYMAP_ITEMS.append(
+            (km_obj.keymap_items.new("bir.toggle_hud", "H", "PRESS"), True))
+        _KEYMAP_ITEMS.append(
             (km.keymap_items.new("bir.regenerate_lines", "L", "PRESS"), True))
         _KEYMAP_BOUND = True
     except Exception:
         pass
+
+
+def _suppress_foreign_h(fly):
+    """Blender binds H to Hide Selected in object mode, which can win over the
+    addon's H. While Fly owns H, mute every other H binding and restore it in
+    Build mode."""
+    global _FOREIGN_H
+    if fly:
+        if _FOREIGN_H:
+            return
+        try:
+            configs = list(bpy.context.window_manager.keyconfigs)
+        except Exception:
+            return
+        for kc in configs:
+            try:
+                maps = list(kc.keymaps)
+            except Exception:
+                continue
+            for km in maps:
+                for kmi in km.keymap_items:
+                    try:
+                        if kmi.type != "H" or kmi.value != "PRESS":
+                            continue
+                        if kmi.idname == "bir.toggle_hud" or not kmi.active:
+                            continue
+                        kmi.active = False
+                        _FOREIGN_H.append(kmi)
+                    except Exception:
+                        pass
+    else:
+        for kmi in _FOREIGN_H:
+            try:
+                kmi.active = True
+            except Exception:
+                pass
+        _FOREIGN_H = []
 
 
 def _set_keymap_fly(fly):
@@ -2866,6 +3044,7 @@ def _set_keymap_fly(fly):
                 kmi.active = bool(fly)
             except Exception:
                 pass
+    _suppress_foreign_h(bool(fly))
 
 
 # --- on-screen overlay (HUD) -----------------------------------------------
@@ -2879,16 +3058,237 @@ def _blf_size(fid, size):
             pass
 
 
-def _draw_busy(fid, w, h):
-    label = ("WORKING  -  %s ..." % _BUSY_LABEL) if _BUSY_LABEL else "WORKING ..."
-    _blf_size(fid, 22)
-    blf.color(fid, 1.0, 0.85, 0.25, 1.0)
+def _hud_scale():
+    """Respect Blender's UI scale so the HUD is not tiny on a 4K / scaled display."""
     try:
-        tw = blf.dimensions(fid, label)[0]
+        return max(1.0, float(bpy.context.preferences.system.ui_scale))
     except Exception:
-        tw = 0.0
-    blf.position(fid, max(26.0, (w - tw) * 0.5), h * 0.5, 0)
-    blf.draw(fid, label)
+        return 1.0
+
+
+def _hud_font(size):
+    return max(8, int(round(float(size) * _hud_scale())))
+
+
+def _hud_bottom(h):
+    """Bottom-safe y for cards. A maximized area's region can be taller than the
+    window on some DPI / multi-monitor setups; shift the bottom row up by the
+    hidden part so it never lands off-screen."""
+    s = _hud_scale()
+    try:
+        win_h = float(bpy.context.window.height)
+    except Exception:
+        win_h = float(h)
+    return 64 * s + max(0.0, float(h) - win_h)
+
+
+def _hud_text(text, x, y, size, color):
+    if blf is None:
+        return
+    try:
+        _blf_size(0, _hud_font(size))
+        blf.color(0, color[0], color[1], color[2], color[3])
+        blf.position(0, x, y, 0)
+        blf.draw(0, text)
+    except Exception:
+        pass
+
+
+def _hud_width(text, size):
+    try:
+        _blf_size(0, _hud_font(size))
+        return float(blf.dimensions(0, text)[0])
+    except Exception:
+        return 0.0
+
+
+def _hud_fit(text, max_w, size):
+    try:
+        if _hud_width(text, size) <= max_w:
+            return text
+        suffix = "..."
+        while len(text) > 1 and _hud_width(text + suffix, size) > max_w:
+            text = text[:-1]
+        return text + suffix
+    except Exception:
+        return text
+
+
+def _hud_rect(x, y, w, h, color):
+    if w <= 0 or h <= 0:
+        return
+    try:
+        import gpu
+        from gpu_extras.batch import batch_for_shader
+        shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+        verts = [(x, y, 0.0), (x + w, y, 0.0), (x + w, y + h, 0.0),
+                 (x, y, 0.0), (x + w, y + h, 0.0), (x, y + h, 0.0)]
+        batch = batch_for_shader(shader, "TRIS", {"pos": verts})
+        gpu.state.blend_set("ALPHA")
+        shader.bind()
+        shader.uniform_float("color", color)
+        batch.draw(shader)
+        gpu.state.blend_set("NONE")
+    except Exception:
+        pass
+
+
+def _hud_card(x, y, w, h, accent=None):
+    """A dark glass card with a hairline border and an optional accent line."""
+    _hud_rect(x - 1, y - 1, w + 2, h + 2, (0.50, 0.66, 0.82, 0.20))
+    _hud_rect(x, y, w, h, (0.025, 0.035, 0.048, 0.82))
+    if accent:
+        _hud_rect(x, y + h - 2.0, w, 2.0, accent)
+
+
+def _hud_pill(x, y, text, size, fg, bg):
+    s = _hud_scale()
+    pad = 6 * s
+    w = _hud_width(text, size) + pad * 2
+    h = _hud_font(size) + 6 * s
+    _hud_rect(x, y, w, h, bg)
+    _hud_text(text, x + pad, y + (h - _hud_font(size)) * 0.5 + s, size, fg)
+    return w
+
+
+def _control_rows(st):
+    rows = [
+        [("MMB", "Orbit"), ("Shift+MMB", "Pan"), ("Scroll", "Zoom"),
+         ("Shift+`", "Walk")],
+        [("Enter", "Capture"), ("F", "Frame"), ("F10", "UI"),
+         ("H", "HUD"), ("N", "Panel")],
+    ]
+    if st is not None and st.mode in _LINE_MODES:
+        rows[1].insert(1, ("L", "Lines"))
+    return rows
+
+
+def _draw_top_card(st, w, h):
+    s = _hud_scale()
+    margin = 18 * s
+    pad = 12 * s
+    view = ""
+    try:
+        view = str((_SPEC or {}).get("source", {}).get("active_view") or "")
+    except Exception:
+        pass
+    line = _MODEL_NAME or "model"
+    if view:
+        line += "  ·  " + view
+    line = _hud_fit(line, max(140 * s, w * 0.48), 11)
+    mode = _MODE_LABEL.get(st.mode, st.mode).upper()
+    chips = [
+        ("MODE   " + mode, (0.10, 0.18, 0.26, 0.95), (0.70, 0.88, 1.0, 0.95)),
+        ("ENGINE   " + str(st.engine), (0.10, 0.14, 0.18, 0.95),
+         (0.72, 0.80, 0.88, 0.90)),
+        ("FRAMED" if st.frame_view else "FREE NAV",
+         (0.10, 0.25, 0.16, 0.95) if st.frame_view else (0.12, 0.12, 0.13, 0.95),
+         (0.55, 1.0, 0.70, 0.95) if st.frame_view else (0.62, 0.68, 0.72, 0.90)),
+    ]
+    title_sz, line_sz, chip_sz = 15, 11, 9.5
+    chip_gap = 6 * s
+    chip_w = (sum(_hud_width(t, chip_sz) + 12 * s for t, _b, _f in chips)
+              + chip_gap * (len(chips) - 1))
+    card_w = min(w - 2 * margin,
+                 max(_hud_width(_TITLE, title_sz), _hud_width(line, line_sz),
+                     chip_w) + pad * 2)
+    chip_h = _hud_font(chip_sz) + 6 * s
+    card_h = (pad * 2 + _hud_font(title_sz) + 4 * s + _hud_font(line_sz)
+              + 8 * s + chip_h)
+    x, y = margin, h - margin - card_h
+    _hud_card(x, y, card_w, card_h, (0.35, 0.65, 0.90, 0.75))
+    _hud_text(_TITLE, x + pad, y + card_h - pad - _hud_font(title_sz),
+              title_sz, (0.72, 0.90, 1.0, 0.95))
+    _hud_text(line, x + pad,
+              y + card_h - pad - _hud_font(title_sz) - 4 * s - _hud_font(line_sz),
+              line_sz, (0.64, 0.74, 0.83, 0.82))
+    cx = x + pad
+    for text, bg, fg in chips:
+        cw = _hud_pill(cx, y + pad, text, chip_sz, fg, bg)
+        cx += cw + chip_gap
+    return x, y, card_w, card_h
+
+
+def _draw_controls(st, w, h, below_y=None):
+    s = _hud_scale()
+    pad = 9 * s
+    row_h = 20 * s
+    rows = _control_rows(st)
+
+    def row_width(row):
+        total = 0
+        for i, (key, label) in enumerate(row):
+            total += _hud_width(key, 9) + 8 * s + 4 * s + _hud_width(label, 10)
+            if i < len(row) - 1:
+                total += 12 * s
+        return total
+
+    card_w = max(row_width(r) for r in rows) + pad * 2
+    card_h = pad * 2 + len(rows) * row_h
+    x = 18 * s
+    y = (_hud_bottom(h) if below_y is None
+         else below_y - 10 * s - card_h)
+    _hud_card(x, y, card_w, card_h)
+    for ri, row in enumerate(rows):
+        ry = y + card_h - pad - row_h - ri * row_h
+        cx = x + pad
+        for key, label in row:
+            kw = _hud_width(key, 9) + 8 * s
+            kh = row_h - 5 * s
+            _hud_rect(cx, ry + 2 * s, kw, kh, (0.12, 0.16, 0.20, 0.95))
+            _hud_text(key, cx + 4 * s,
+                      ry + 2 * s + (kh - _hud_font(9)) * 0.5 + s, 9,
+                      (0.85, 0.92, 1.0, 0.95))
+            cx += kw + 4 * s
+            _hud_text(label, cx,
+                      ry + 2 * s + (kh - _hud_font(10)) * 0.5 + s, 10,
+                      (0.66, 0.74, 0.82, 0.85))
+            cx += _hud_width(label, 10) + 12 * s
+    return y, card_h
+
+
+def _status_style(text):
+    low = text.lower()
+    if "error" in low or "failed" in low or "couldn't" in low:
+        return (1.0, 0.45, 0.40, 0.95), 12.0
+    if ("saved" in low or "synced" in low or "removed" in low
+            or "reloaded" in low):
+        return (0.50, 1.0, 0.65, 0.95), 4.5
+    return (0.60, 0.85, 1.0, 0.95), 6.0
+
+
+def _draw_status(text, w, h, above_y=None):
+    s = _hud_scale()
+    size = 11
+    pad = 12 * s
+    dot = 5 * s
+    fg, _ttl = _status_style(text)
+    tw = _hud_width(text, size) + pad * 2 + dot + 8 * s
+    th = _hud_font(size) + 12 * s
+    if above_y is None:
+        x, y = (w - tw) * 0.5, _hud_bottom(h)
+    else:
+        x, y = 18 * s, above_y - 8 * s - th
+    _hud_card(x, y, tw, th, fg)
+    _hud_rect(x + pad, y + (th - dot) * 0.5, dot, dot, fg)
+    _hud_text(text, x + pad + dot + 8 * s,
+              y + (th - _hud_font(size)) * 0.5 + s, size,
+              (0.92, 0.96, 1.0, 0.96))
+
+
+def _draw_busy(fid, w, h):
+    s = _hud_scale()
+    _hud_rect(0, 0, w, h, (0.0, 0.0, 0.0, 0.28))
+    label = _BUSY_LABEL or "Working"
+    dots = "." * (1 + int(time.time() * 3) % 3)
+    text = "WORKING   %s%s" % (label, dots)
+    size = 13
+    tw = _hud_width(text, size) + 36 * s
+    th = _hud_font(size) + 22 * s
+    x, y = (w - tw) * 0.5, h * 0.5 - th * 0.5
+    _hud_card(x, y, tw, th, (1.0, 0.80, 0.30, 0.90))
+    _hud_text(text, x + 18 * s, y + (th - _hud_font(size)) * 0.5 + s, size,
+              (1.0, 0.90, 0.70, 0.95))
 
 
 def _draw_sheet_guide():
@@ -2942,16 +3342,20 @@ def _draw_sheet_guide():
         label = "%s  %s  %s   %d x %d px" % (
             st.drawing_paper, orient, st.drawing_scale,
             sc.render.resolution_x, sc.render.resolution_y)
-        fid = 0
-        _blf_size(fid, 13)
-        blf.color(fid, 0.98, 0.93, 0.78, 0.95)
-        blf.position(fid, min_x + 6, min_y + 8, 0)
-        blf.draw(fid, label)
+        size = 11
+        pad = 6 * _hud_scale()
+        tw = _hud_width(label, size) + pad * 2
+        th = _hud_font(size) + 8 * _hud_scale()
+        _hud_card(min_x + pad, min_y + pad, tw, th, (0.98, 0.93, 0.78, 0.60))
+        _hud_text(label, min_x + pad * 2,
+                  min_y + pad + (th - _hud_font(size)) * 0.5 + _hud_scale(),
+                  size, (0.98, 0.93, 0.78, 0.95))
     except Exception:
         pass
 
 
 def _draw_hud():
+    global _STATUS_SEEN, _STATUS_AT
     try:
         _draw_sheet_guide()               # sheet outline: both Fly and Build modes
     except Exception:
@@ -2962,35 +3366,27 @@ def _draw_hud():
         region = bpy.context.region
         w = region.width if region else 1200
         h = region.height if region else 900
-        fid = 0
         if _BUSY:
-            _draw_busy(fid, w, h)      # show even in Build mode (mode switches)
+            _draw_busy(0, w, h)           # show even in Build mode (mode switches)
+            return
         if not _FLY_MODE:
             return
-        _blf_size(fid, 16)
-        blf.color(fid, 0.75, 0.9, 1.0, 0.9)
-        blf.position(fid, 26, h - 34, 0)
-        blf.draw(fid, _TITLE)
-        # model / engine / mode readout (the requested status HUD)
         st = getattr(bpy.context.scene, "bir", None)
-        info = "MODEL  %s        ENGINE  %s        MODE  %s" % (
-            _MODEL_NAME or "-", (st.engine if st else "-"), (st.mode if st else "-"))
-        _blf_size(fid, 12)
-        blf.color(fid, 0.6, 0.85, 1.0, 0.85)
-        blf.position(fid, 26, h - 54, 0)
-        blf.draw(fid, info)
-        _blf_size(fid, 12)
-        blf.color(fid, 1.0, 1.0, 1.0, 0.55)
-        y = h - 80
-        for line in _CONTROLS:
-            blf.position(fid, 26, y, 0)
-            blf.draw(fid, line)
-            y -= 19
+        if st is None:
+            return
+        if not st.show_hud:
+            _hud_text("H   HUD", 18 * _hud_scale(), h - 46 * _hud_scale(), 9,
+                      (0.70, 0.80, 0.90, 0.45))
+            return
+        _tx, _ty, _tw, _th = _draw_top_card(st, w, h)
+        _cy, _ch = _draw_controls(st, w, h, below_y=_ty)
+        if _STATUS != _STATUS_SEEN:
+            _STATUS_SEEN = _STATUS
+            _STATUS_AT = time.time()
         if _STATUS:
-            _blf_size(fid, 14)
-            blf.color(fid, 0.7, 0.95, 1.0, 0.9)
-            blf.position(fid, 26, 24, 0)
-            blf.draw(fid, _STATUS)
+            _fg, ttl = _status_style(_STATUS)
+            if ttl > 10.0 or (time.time() - _STATUS_AT) < ttl:
+                _draw_status(_STATUS, w, h, above_y=_cy)
     except Exception:
         pass
 
@@ -3023,6 +3419,7 @@ def _deferred_setup():
     _sync_settings_from_scene()
     _enter_fly()
     _frame_free_view()
+    _open_blendit_panel()
     # Verify the stripped Fly state (single maximized viewport) actually stuck;
     # if not, try again shortly. The N-panel is force-opened inside _enter_fly.
     if not _is_maximized() and _SETUP_TRIES < 40:

@@ -84,7 +84,8 @@ def main():
     concrete["maps"] = {
         "diffuse": {"source_path": diffuse_src,
                     "scale_m": [0.6, 0.3], "offset_m": [0.0, 0.0],
-                    "rotation_deg": 0.0},
+                    "rotation_deg": 0.0,
+                    "tint": [0.5, 1.0, 1.0], "invert": True, "fade": 0.6},
         "bump": {"source_path": bump_src, "amount": 0.4,
                  "scale_m": [0.6, 0.3]},
     }
@@ -119,7 +120,8 @@ def main():
     # must not accumulate suffixed copies, and uris must stay stable.
     spec2 = build_spec()
     spec2["materials"][0]["maps"] = {
-        "diffuse": {"source_path": diffuse_src, "scale_m": [0.6, 0.3]},
+        "diffuse": {"source_path": diffuse_src, "scale_m": [0.6, 0.3],
+                    "tint": [0.5, 1.0, 1.0], "invert": True, "fade": 0.6},
         "bump": {"source_path": bump_src, "amount": 0.4, "scale_m": [0.6, 0.3]},
     }
     get_exporter("gltf").export(spec2, meshes, bundle)
@@ -142,7 +144,7 @@ def main():
 
     # The material actually rendering = the one on the merged object (the glTF
     # importer also creates a same-named material from the glb; don't grab that).
-    obj = bpy.data.objects.get("BIR_Mat_mat_concrete")
+    obj = bpy.data.objects.get("BIR_Mat_Concrete - Smooth")
     mat = obj.data.materials[0] if obj and obj.data.materials else None
     check("concrete material assigned on the merged object", mat is not None)
     nodes = mat.node_tree.nodes if mat else []
@@ -159,11 +161,25 @@ def main():
     bump = next((n for n in nodes if n.type == "BUMP"), None)
     check("bump node wired at the extracted amount",
           bump is not None and abs(bump.inputs["Strength"].default_value - 0.4) < 1e-4)
+    inv = next((n for n in nodes if n.type == "INVERT"), None)
+    mix = [n for n in nodes if n.type == "MIX"]
+    check("invert node built for an inverted bitmap", inv is not None)
+    check("tint + fade mix nodes built", len(mix) >= 2, str(len(mix)))
+    check("fade factor read", any(abs(m.inputs[0].default_value - 0.6) < 1e-5
+                                  for m in mix), str([m.inputs[0].default_value for m in mix]))
+    check("image tint reads red", any(
+        m.inputs[6].default_value[0] == 0.5 and m.inputs[6].default_value[1] == 1.0
+        for m in mix))
     tc = next((n for n in nodes if n.type == "TEX_COORD"), None)
     check("driven by Object coordinates (world metres)",
           tc is not None and mapping is not None and
           any(l.from_node == tc and l.from_socket.name == "Object"
               for l in mat.node_tree.links if l.to_node == mapping))
+
+    audit = os.path.join(bundle, "materials_audit.txt")
+    txt = open(audit).read() if os.path.isfile(audit) else ""
+    check("material audit written beside the bundle",
+          "Concrete - Smooth" in txt and "Revit texture" in txt)
 
     # --- 3. override precedence: "plain" beats the real maps ------------------
     from blender.pipeline.materials import build_material

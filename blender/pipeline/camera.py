@@ -166,7 +166,41 @@ def setup_camera(spec, scale):
     else:
         cam_data.clip_start = max(0.01, float(cspec.get("clip_start", 0.1)) * scale)
     cam_data.clip_end = max(1000.0, float(cspec.get("clip_end", 10000.0)) * scale)
+    ensure_far_clip(cam_obj)
     return cam_obj
+
+
+def ensure_far_clip(cam_obj):
+    """Make the camera's far clip reach every piece of model geometry.
+
+    A bundle's clip_end is a fixed Revit value (~3 km once scaled to metres). A
+    large site viewed from outside that radius loses everything past the far
+    plane - a clean straight cut through the model that looks like the frame ate
+    half the scene. The camera is already positioned, so measure the real
+    camera-to-geometry distance and extend the far clip to cover it. The
+    artificial ground is ignored: it is deliberately much larger than the model
+    and clipping its far edge just reads as a horizon."""
+    try:
+        cam_data = cam_obj.data
+        bb = _scene_bbox(exclude=_DRAWING_BBOX_EXCLUDE)
+        if bb is None:
+            return
+        bpy.context.view_layer.update()
+        pos = cam_obj.matrix_world.translation
+        mn, mx = bb
+        far = 0.0
+        for x in (mn.x, mx.x):
+            for y in (mn.y, mx.y):
+                for z in (mn.z, mx.z):
+                    d = (mathutils.Vector((x, y, z)) - pos).length
+                    if d > far:
+                        far = d
+        if far > 0.0:
+            cam_data.clip_end = max(float(cam_data.clip_end), far * 1.05 + 1.0)
+        if cam_data.clip_start >= cam_data.clip_end:
+            cam_data.clip_start = max(0.001, cam_data.clip_end * 0.001)
+    except Exception:
+        pass
 
 
 def _set_pose(cam_obj, pos, forward, up_hint):
